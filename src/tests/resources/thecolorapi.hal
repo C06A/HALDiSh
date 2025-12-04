@@ -1,0 +1,18 @@
+{
+  "_links": {
+    "self": {
+      "href": "file:///$TEST_DIR/thecolotapi.hal"
+      "type": "application/hal+json"
+    },
+    "color": {
+      "href": "https://www.thecolorapi.com/id{?rgb,hex,hsl,hsv,cmyk,format,w,named}",
+      "type": "application/json",
+      "templated": true
+    },
+    "schema": {
+      "href": "https://www.thecolorapi.com/scheme{?rgb,hex,hsl,hsv,cmyk,format,mode,count}",
+      "type": "application/json",
+      "templated": true
+    }
+  }
+}

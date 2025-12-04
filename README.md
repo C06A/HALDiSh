@@ -1,0 +1,94 @@
+# HAL-DIscovering SHell scripts
+
+This project contains BASH shell scripts to HTTP requests to the server
+and extract information from the response. These scripts can be combined into 
+common scenarios like Login, SSO, etc. or to execute and validate manual
+or semi-automated tests.
+
+## Project Structure
+
+```
+.
+├── build.gradle.kts          # Main build configuration
+├── settings.gradle.kts       # Project settings
+├── gradle.properties         # Project properties and credentials
+├── .gitignore
+├── LICENSE
+├── README.md
+└── src/
+    └── main/
+        └── scripts/
+            ├── init.sh       # Main initialization script (required)
+            ├── setup.sh      # Optional setup script
+            └── *.sh          # Any other shell scripts
+    └── test/
+        └── resources/
+            └── *             # Files, needed for testing the Project
+        └── scripts/
+            └── *             # Test scripts
+```
+
+## How It Works
+
+The distribution self-extracting archive include all scripts from the
+`src/main/scripts` folder and when executed:
+
+- Extracts all scripts to a temporary directory
+- Automatically executes `init.sh`
+- Passes any command-line arguments to `init.sh`
+- The `init.sh` also calls `setup.sh` script, which:
+  - create hardlink for `http.sh` script with HTTP Methods as names
+  - prepares the validation values to check that these scripts were not altered
+- Cleans up temporary files after execution
+
+## Scripts in distribution
+
+The distributed archive includes a few scripts to call server API, extract other links, 
+and "glue" them into the scenario script for multiple tasks.
+
+In order to extract information from the HAL/JSON resource,
+the script can use other common utilities like `jq` or `yq` or the UNIX built-in utilities
+like sed, awk, etc.
+
+Most scripts are designed as a UNIX filters, so they take data from the STDIN,
+apply some manipulations, and passing the result to the STDOUT.
+This means that these scripts can be combined into the pipeline.
+
+### Validation of the installation
+
+The installation location includes the `validator.sh` script, which
+prepands the script location to the `$PATH` variable, so all executables
+in the installation folder can be called simply by names.
+
+In order to use this script, source it at the top of your script
+or in the shell.
+
+### Usage of the scripts
+
+Each script can be used separately or combined in the pipeline.
+
+For example, pipeline could be constructed like this:
+
+1. extract the URI template from the HAL/JSON file
+and pass it via a pipe to the `uritengin.sh` script
+2. that script will apply values to the placeholders in the template and
+pass the resulting URL to the `GET` script
+3. the `GET` script (as other scripts named after HTTP Methods),
+which will send HTTP request and save different portions of the request and response
+into separate files. It will pass the base name of created files
+(the same for all files) to the `rename.sh` script
+4. the renaming script will rename all files sharing the same base name,
+retrieved from the pipe, to the base name, provided as a argument and
+pass new base name to the next script in the pipeline
+5. the next script could be `adoc.sh`,
+which will combine all files with base name from the pipe
+and pass their contents as tagged regions to the STDOUT.
+
+Unnecessary steps in this pipeline can be skipped.
+
+The next step may repeat similar pipeline starting with extracting another link
+from the downloaded resource.
+
+For more informaytion about each script, see the comments at the beginning of the script.
+
+For working examples look the scripts in the `src/test/scripts`

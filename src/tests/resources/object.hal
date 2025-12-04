@@ -1,0 +1,113 @@
+{
+  "_links": {
+    "self": {
+      "href": "$HAL_ROOT/start.hal",
+      "type": "application/hal+json"
+	  },
+    "simple": [
+	  {
+		    "href": "$HAL_ROOT/empty.json",
+			"name": "simple",
+            "type": "application/json"
+		},
+	    {
+			"href": "$HAL_ROOT/null.json",
+			"name": "null",
+            "type": "application/json"
+	    },
+		{
+			"href": "$HAL_ROOT/number.json",
+			"name": "number",
+            "type": "application/json"
+		},
+	    {
+			"href": "$HAL_ROOT/string.json",
+			"name": "string",
+            "type": "application/json"
+	    }
+	  ],
+    "start": {
+      "href": "$HAL_ROOT/start.hal"
+	  },
+    "object": {
+      "href": "$HAL_ROOT/object.hal"
+    },
+    "array": {
+      "href": "$HAL_ROOT/array.hal"
+    }
+  },
+  "_embedded": {
+    "simple": [
+	    {
+	      "_links": {
+	        "self": {
+	          "href": "$HAL_ROOT/empty.json",
+              "type": "application/json"
+			}
+	      },
+		  "title": "empty resource",
+		  "links": 0,
+		  "embeddeds": 0
+	    },
+	    {
+	      "_links": {
+	        "self": {
+	          "href": "$HAL_ROOT/null.json",
+              "type": "application/json"
+			}
+	      },
+		  "title": "null resource",
+		  "links": 0,
+		  "embeddeds": 0
+	    },
+		{
+	      "_links": {
+	        "self": {
+	          "href": "$HAL_ROOT/number.json",
+              "type": "application/json"
+			}
+	      },
+		  "title": "number resource",
+		  "links": 0,
+		  "embeddeds": 0
+		},
+	    {
+	      "_links": {
+	        "self": {
+	          "href": "$HAL_ROOT/string.json",
+              "type": "application/json"
+			}
+	      },
+		  "title": "string resource",
+		  "links": 0,
+		  "embeddeds": 0
+	    }
+	  ],
+    "object": {
+      "_links": {
+        "self": {
+          "href": "$HAL_ROOT/object.hal",
+          "type": "application/hal+json"
+		}
+      },
+	  "title": "single object resources",
+	  "links": 5,
+	  "embeddeds": 4
+    },
+    "array": {
+      "_links": {
+        "self": {
+          "href": "$HAL_ROOT/array.hal",
+          "type": "application/hal+json"
+		}
+      },
+	  "title": "collection of  resources",
+	  "links": 5,
+	  "embeddeds": 4
+    },
+  },
+  "description": "This resource contains all elements of the single HAL resource.",
+  "title": "object resources",
+  "links": 5,
+  "embeddeds": 4
+}

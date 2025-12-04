@@ -1,0 +1,17 @@
+{
+  "_links": {
+    "self": {
+      "href": "file:///$TEST_DIR/apiGuru.hal",
+      "type": "application/hal+json"
+    },
+    "providers": {
+      "href": "https://api.apis.guru/v2/providers.json",
+      "type": "application/json"
+    },
+    "endpoint": {
+      "href": "https://api.apis.guru/v2{/endpoint}.json",
+      "type": "application/json",
+      "templated": true
+    }
+  }
+}

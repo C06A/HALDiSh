@@ -1,0 +1,55 @@
+[
+  {
+    "_links": {
+      "self": {
+        "href": "$HAL_ROOT/start.hal",
+        "type": "application/hal+json"
+      },
+	  "simple": [
+	    {
+		    "href": "$HAL_ROOT/empty.json",
+			"name": "simple",
+            "type": "application/json"
+		},
+	    {
+			"href": "$HAL_ROOT/null.json",
+			"name": "null",
+            "type": "application/json"
+	    },
+		{
+			"href": "$HAL_ROOT/number.json",
+			"name": "number",
+            "type": "application/json"
+		},
+	    {
+			"href": "$HAL_ROOT/string.json",
+			"name": "string",
+            "type": "application/json"
+	    }
+	  ],
+	  "object": {
+	    "href": "$HAL_ROOT/object.hal",
+        "type": "application/hal+json"
+	  },
+	  "array": {
+	    "href": "$HAL_ROOT/array.hal",
+        "type": "application/hal+json"
+	  }
+    },
+	"title": "first"
+  },
+  {
+    "_links": {
+      "href": "$HAL_ROOT/object.hal",
+      "type": "application/hal+json"
+    },
+	"title": "second"
+  },
+  {
+    "_links": {
+      "href": "$HAL_ROOT/array.hal",
+      "type": "application/hal+json"
+    },
+	"title": "third"
+  }
+]

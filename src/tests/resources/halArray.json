@@ -1,0 +1,24 @@
+[
+  {
+    "message": "Hello",
+    "status": "success",
+    "_links": {
+      "self": { "href": "/example/hello" },
+      "next": { "href": "/example/world" }
+    },
+    "_embedded": {
+      "item": { "name": "example", "_links": { "self": { "href": "/item" } } }
+    }
+  },
+  {
+    "message": "World",
+    "status": "failed",
+    "_links": {
+      "self": { "href": "/example/world" },
+      "next": { "href": "/next/world" }
+    },
+    "_embedded": {
+      "item": { "name": "world", "_links": { "self": { "href": "/item/1" } } }
+    }
+  }
+]
