@@ -39,4 +39,12 @@ jobs:
       - name: Check PWD
         run: |
           pwd
-          echo $(pwd)
+          ls -l
+
+      # 
+      - name: Build distributable archive
+        run: ./gradlew buildArchive
+
+      # Run tests
+      - name: Run URI Template tests
+        run: ./src/tests/scripts/uritenginSpec.sh
