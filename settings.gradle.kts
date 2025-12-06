@@ -1,1 +1,1 @@
-rootProject.name = "self-extracting-scripts"
+rootProject.name = "HALDiSh"

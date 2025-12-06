@@ -7,10 +7,15 @@
 # folder, to execute the spec in and collect resulting files.
 #
 
+set -eu -o pipefail
+
 setup() {
   subf=$1
 
-  cd ../../../build
+  SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" >/dev/null 2>&1 && pwd)"
+  RESOURCES_DIR="$(cd -- $SCRIPT_DIR/../resources >/dev/null 2>&1 && pwd)"
+
+  cd $SCRIPT_DIR/../../../build
   [ -e "deployed" ] || mkdir deployed
   [ -e "test/$subf" ] || mkdir -p test/$subf
   [ -e "distributions" ] || { echo "There is no distributions folder"; exit 249; }
@@ -26,6 +31,3 @@ setup() {
 
   cd test/$subf
 }
-
-cd $(dirname $0); SCRIPT_DIR=$(pwd); cd - >/dev/null
-cd $SCRIPT_DIR/../resources; RESOURCES_DIR=$(pwd); cd - >/dev/null

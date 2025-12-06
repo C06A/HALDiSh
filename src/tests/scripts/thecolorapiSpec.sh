@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-. ./specSetup.sh
+. $(cd -- "$(dirname -- "$0")" >/dev/null 2>&1 && pwd)/specSetup.sh
 setup thecolorapi
 
 rm ./*

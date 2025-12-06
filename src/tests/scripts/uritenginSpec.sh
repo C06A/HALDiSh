@@ -1,9 +1,7 @@
 #!/usr/bin/env bash
 # test_uritengin.sh — unit-style tests for uritengin.sh (Bash 3.x compatible)
 
-set -u
-
-. ./specSetup.sh
+. $(cd -- "$(dirname -- "$0")" >/dev/null 2>&1 && pwd)/specSetup.sh
 setup uritengin
 
 pass=0
