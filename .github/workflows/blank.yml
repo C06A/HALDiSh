@@ -47,4 +47,4 @@ jobs:
 
       # Run tests
       - name: Run URI Template tests
-        run: ./src/tests/scripts/uritenginSpec.sh
+        run: ./src/tests/scripts/adocSpec.sh
