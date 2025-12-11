@@ -1,3 +1,4 @@
+
 # HAL-DIscovering SHell scripts
 
 This project contains BASH shell scripts to HTTP requests to the server
@@ -69,9 +70,9 @@ or in the interactive shell.
 
 For example:
 
-[source,console]
+[source,bash]
 ----
-include::src/tests/scripts/apiGuruSpec.sh[tags=sourcingValidator]
+include::src/tests/scripts/apiGuruSpec.sh[tag=sourcingValidator]
 ----
 
 This would be an only line, referencing the script form this package explicitly. All follow calls to other script can be done by a name only.
