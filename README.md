@@ -77,6 +77,7 @@ the interactive shell.
 For example:
 
 ``` bash
+. $VALIDATOR/validator.sh >/dev/null
 ```
 
 This would be an only line, referencing the script form this package
