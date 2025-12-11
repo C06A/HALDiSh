@@ -2,8 +2,6 @@ name: Build README.asciidoc
 
 on:
   push:
-    branches:
-      - main
   workflow_dispatch:
 
 jobs:
