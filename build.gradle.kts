@@ -1,10 +1,16 @@
+import java.net.URI
+import java.net.http.HttpClient
+import java.net.http.HttpRequest
+import java.net.http.HttpResponse
+import java.util.Base64
+
 plugins {
     id("maven-publish")
     id("signing")
 }
 
 group = "com.helpchoice.hal"
-version = "1.0.0-SHAPSHOT"
+version = "0.1.0"
 
 val archiveName = "HALDiSh"
 val scriptsDir = file("src/main/scripts")
@@ -134,13 +140,14 @@ publishing {
                 extension = "sh"
             }
             
-            artifact(tasks["sourcesJar"])
-            artifact(tasks["javadocJar"])
+//            artifact(tasks["sourcesJar"])
+//            artifact(tasks["javadocJar"])
             
             pom {
-                name.set("Self-Extracting Scripts Archive")
-                description.set("A self-extracting archive that automatically executes init.sh upon extraction")
-                url.set("https://github.com/yourusername/your-repo")
+                name.set("HALDiSh")
+                description.set("""A self-extracting archive that
+                     contains a bash scripts to help discover the HAL remote server API.""")
+                url.set("https://github.com/C06A/HALDiSh")
                 
                 licenses {
                     license {
@@ -151,40 +158,98 @@ publishing {
                 
                 developers {
                     developer {
-                        id.set("yourId")
-                        name.set("Your Name")
-                        email.set("your.email@example.com")
+                        id.set("C06A")
+                        name.set("C.A.B.")
+                        email.set("maven@helpchoice.com")
                     }
                 }
                 
                 scm {
-                    connection.set("scm:git:git://github.com/yourusername/your-repo.git")
-                    developerConnection.set("scm:git:ssh://github.com/yourusername/your-repo.git")
-                    url.set("https://github.com/yourusername/your-repo")
+                    connection.set("scm:git:git://github.com/C06A/HALDiSh.git")
+                    developerConnection.set("scm:git:ssh://github.com/C06A/HALDiSh.git")
+                    url.set("https://github.com/C06A/HALDiSh")
                 }
             }
         }
     }
-    
+
+    configure<SigningExtension> {
+        val keyFilePath = findProperty("signingKeyFile") as String?
+        val password = (findProperty("signingPassword") as String?) ?: ""
+
+        if (keyFilePath.isNullOrBlank()) {
+            error("signingKeyFile is not set (define it in ~/.gradle/gradle.properties)")
+        }
+
+        val signingKey = file(keyFilePath).readText()
+
+        useInMemoryPgpKeys(signingKey, password)
+        sign(publishing.publications["mavenJava"])
+    }
+
     repositories {
         maven {
             name = "OSSRH"
-            val releasesRepoUrl = uri("https://s01.oss.sonatype.org/service/local/staging/deploy/maven2/")
-            val snapshotsRepoUrl = uri("https://s01.oss.sonatype.org/content/repositories/snapshots/")
+//            val releasesRepoUrl = uri("https://s01.oss.sonatype.org/service/local/staging/deploy/maven2/")
+            val releasesRepoUrl = uri(
+            "https://ossrh-staging-api.central.sonatype.com/service/local/staging/deploy/maven2/"
+            )
+//            val snapshotsRepoUrl = uri("https://s01.oss.sonatype.org/content/repositories/snapshots/")
+            val snapshotsRepoUrl = uri(
+                "https://central.sonatype.com/repository/maven-snapshots/"
+            )
+
             url = if (version.toString().endsWith("SNAPSHOT")) snapshotsRepoUrl else releasesRepoUrl
-            
+
             credentials {
-                username = findProperty("ossrhUsername") as String? ?: System.getenv("OSSRH_USERNAME")
-                password = findProperty("ossrhPassword") as String? ?: System.getenv("OSSRH_PASSWORD")
+                username = findProperty("mavenCentralUsername") as String? ?: System.getenv("OSSRH_USERNAME")
+                password = findProperty("mavenCentralPassword") as String? ?: System.getenv("OSSRH_PASSWORD")
             }
         }
     }
 }
 
-signing {
-    sign(publishing.publications["mavenJava"])
-}
-
 tasks.named("publishMavenJavaPublicationToOSSRHRepository") {
     dependsOn("assemble")
+}
+
+tasks.register("publishToMavenCentral") {
+    group = "publishing"
+    description = "Publishes all Maven publications to Maven Central via OSSRH Staging API + Portal."
+
+    // 1) First do the normal Gradle publish (to ossrh-staging-api)
+    dependsOn("publish")
+
+    doLast {
+        // 2) Then notify the OSSRH Staging API to push to the Portal
+        val username = findProperty("mavenCentralUsername") as String?
+            ?: error("mavenCentralUsername is not set (add to ~/.gradle/gradle.properties)")
+        val password = findProperty("mavenCentralPassword") as String?
+            ?: error("mavenCentralPassword is not set (add to ~/.gradle/gradle.properties)")
+        val namespace = findProperty("mavenCentralNamespace") as String?
+            ?: error("mavenCentralNamespace is not set (add to ~/.gradle/gradle.properties)")
+
+        val token = Base64.getEncoder().encodeToString("$username:$password".toByteArray())
+
+        val client = HttpClient.newHttpClient()
+        val url =
+            "https://ossrh-staging-api.central.sonatype.com/manual/upload/defaultRepository/$namespace?publishing_type=user_managed"
+
+        val request = HttpRequest.newBuilder()
+            .uri(URI.create(url))
+            .header("Authorization", "Bearer $token")
+            .POST(HttpRequest.BodyPublishers.noBody())
+            .build()
+
+        val response = client.send(request, HttpResponse.BodyHandlers.ofString())
+
+        if (response.statusCode() !in 200..299) {
+            error(
+                "Failed to trigger upload to Central Portal.\n" +
+                        "HTTP ${response.statusCode()}:\n${response.body()}"
+            )
+        } else {
+            println("Successfully triggered upload to Central Portal (HTTP ${response.statusCode()})")
+        }
+    }
 }
