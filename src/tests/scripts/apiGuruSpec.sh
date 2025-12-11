@@ -42,7 +42,9 @@ getProvider() {
 # tag::sampleApiGuru.sh[]
 #!/usr/bin/env bash
 
+# tag::sourcingValidator[]
 . $VALIDATOR/validator.sh >/dev/null
+# end::sourcingValidator[]
 
 PREV_NAME=providers
 API_GURU_PROVIDERS=$(jq -r "._links.\"$PREV_NAME\".href" $RESOURCES_DIR/apiGuru.hal )

@@ -3,12 +3,14 @@
 -->
 
 
+# HAL-DIscovering SHell scripts
+
 This project contains BASH shell scripts to HTTP requests to the server
 and extract information from the response. These scripts can be combined
 into common scenarios like Login, SSO, etc. or to execute and validate
 manual or semi-automated tests.
 
-# Project Structure
+## Project Structure
 
     .
     ├── build.gradle.kts          # Main build configuration
@@ -29,7 +31,7 @@ manual or semi-automated tests.
             └── scripts/
                 └── *             # Test scripts
 
-# How It Works
+## How It Works
 
 The distribution self-extracting archive include all scripts from the
 `src/main/scripts` folder and when executed:
@@ -49,7 +51,7 @@ The distribution self-extracting archive include all scripts from the
 
 - Cleans up temporary files after execution
 
-# Scripts in distribution
+## Scripts in distribution
 
 The distributed archive includes a few scripts to call server API,
 extract other links, and "glue" them into the scenario script for
@@ -63,7 +65,7 @@ Most scripts are designed as a UNIX filters, so they take data from the
 STDIN, apply some manipulations, and passing the result to the STDOUT.
 This means that these scripts can be combined into the pipeline.
 
-## Validation of the installation
+### Validation of the installation
 
 The installation location includes the `validator.sh` script, which
 prepands the script location to the `$PATH` variable, so all executables
@@ -74,13 +76,13 @@ the interactive shell.
 
 For example:
 
-``` console
+``` bash
 ```
 
 This would be an only line, referencing the script form this package
 explicitly. All follow calls to other script can be done by a name only.
 
-## Usage of the scripts
+### Usage of the scripts
 
 Each script can be used separately or be combined in the pipeline.
 
