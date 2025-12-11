@@ -3,7 +3,7 @@
 . $(cd -- "$(dirname -- "$0")" >/dev/null 2>&1 && pwd)/specSetup.sh
 setup thecolorapi
 
-rm ./*
+[ $(ls -1 | wc -l) -eq 0 ] || rm ./*
 
 cd $(dirname $0); SCRIPT_DIR=$(pwd); cd - >/dev/null
 VALIDATOR=$(dirname $(command -v validator.sh))

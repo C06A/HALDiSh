@@ -24,7 +24,7 @@ setup() {
   if [ $(ls -1 deployed/*.sh 2>/dev/null | wc -l) -le 1 ]
   then
     cp distributions/HALDiSh-*.sh deployed
-    cd deployed; ./HALDiSh-*.sh; cd -
+    $(cd deployed; ./HALDiSh-*.sh)
   fi
 
   . deployed/validator.sh >/dev/null
