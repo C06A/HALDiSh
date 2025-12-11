@@ -68,9 +68,12 @@ In order to use this script, source it at the top of your script
 or in the interactive shell.
 
 For example:
+
+[source,console]
 ----
 include::src/tests/scripts/apiGuruSpec.sh[tags=sourcingValidator]
 ----
+
 This would be an only line, referencing the script form this package explicitly. All follow calls to other script can be done by a name only.
 
 
@@ -105,7 +108,7 @@ For more information about each script, see the comments at the beginning of the
 Here is the example, accessing the list of Providers in apiGuru site
 and the first Provider from the list.
 
-[source,console]
+[source,bash]
 ----
 include::src/tests/scripts/apiGuruSpec.sh[tag=sampleApiGuru.sh]
 ----
