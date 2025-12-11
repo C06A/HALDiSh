@@ -15,19 +15,29 @@ jobs:
           persist-credentials: true
           fetch-depth: 0
 
-      - name: Check if README sources changed
+      - name: Decide if README needs rebuild
         id: diff
         run: |
-          # If this is the first commit on the branch, just build
-          if [ "$(git rev-list --count HEAD)" -le 1 ]; then
+          # Force build if README.asciidoc does not exist yet
+          if [ ! -f README.asciidoc ]; then
+            echo "README.asciidoc missing, will build it."
             echo "changed=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
-          # Adjust the pattern as needed (e.g. add docs/*.adoc, etc.)
+          # If this is the first commit or HEAD^ doesn't exist, just build
+          if ! git rev-parse HEAD^ >/dev/null 2>&1; then
+            echo "no parent commit, will build README.asciidoc"
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Rebuild if any AsciiDoc source changed in the last commit
           if git diff --name-only HEAD^ HEAD | grep -E '^(README-src\.asciidoc|.*\.asciidoc|.*\.adoc|src/tests/scripts/apiGuruSpec.sh)$' >/dev/null; then
+            echo "AsciiDoc sources changed, will rebuild README.asciidoc"
             echo "changed=true" >> "$GITHUB_OUTPUT"
           else
+            echo "no relevant changes, skipping README build"
             echo "changed=false" >> "$GITHUB_OUTPUT"
           fi
 
