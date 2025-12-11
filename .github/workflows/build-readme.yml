@@ -1,0 +1,67 @@
+name: Build README.asciidoc
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build-readme:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+          fetch-depth: 0
+
+      - name: Check if README sources changed
+        id: diff
+        run: |
+          # If this is the first commit on the branch, just build
+          if [ "$(git rev-list --count HEAD)" -le 1 ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Adjust the pattern as needed (e.g. add docs/*.adoc, etc.)
+          if git diff --name-only HEAD^ HEAD | grep -E '^(README-src\.asciidoc|.*\.asciidoc|.*\.adoc|src/tests/scripts/apiGuruSpec.sh)$' >/dev/null; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Ruby
+        if: steps.diff.outputs.changed == 'true'
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+
+      - name: Install Asciidoctor
+        if: steps.diff.outputs.changed == 'true'
+        run: gem install asciidoctor
+
+      - name: Generate README.asciidoc from README-src.asciidoc
+        if: steps.diff.outputs.changed == 'true'
+        run: |
+          HEADER="// AUTO-GENERATED FILE — DO NOT EDIT.
+          // Edit README-src.asciidoc and let CI regenerate this file.
+
+          "
+          CONTENT=$(asciidoctor -o - README-src.asciidoc)
+          printf "%s\n%s" "$HEADER" "$CONTENT" > README.asciidoc
+
+      - name: Commit changes if any
+        if: steps.diff.outputs.changed == 'true'
+        run: |
+          if git status --porcelain | grep -q 'README.asciidoc'; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add README.asciidoc
+            git commit -m "chore: rebuild README.asciidoc [skip ci]"
+            git push
+          else
+            echo "no README.asciidoc changes to commit"
+          fi
