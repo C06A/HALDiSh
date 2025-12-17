@@ -1,39 +1,39 @@
 {
   "_links": {
     "self": {
-      "href": "$HAL_ROOT/start.hal",
+      "href": "$RESOURCES_DIR/object.hal",
       "type": "application/hal+json"
 	  },
     "simple": [
 	  {
-		    "href": "$HAL_ROOT/empty.json",
+		    "href": "$RESOURCES_DIR/empty.json",
 			"name": "simple",
             "type": "application/json"
 		},
 	    {
-			"href": "$HAL_ROOT/null.json",
+			"href": "$RESOURCES_DIR/null.json",
 			"name": "null",
             "type": "application/json"
 	    },
 		{
-			"href": "$HAL_ROOT/number.json",
+			"href": "$RESOURCES_DIR/number.json",
 			"name": "number",
             "type": "application/json"
 		},
 	    {
-			"href": "$HAL_ROOT/string.json",
+			"href": "$RESOURCES_DIR/string.json",
 			"name": "string",
             "type": "application/json"
 	    }
 	  ],
     "start": {
-      "href": "$HAL_ROOT/start.hal"
+      "href": "$RESOURCES_DIR/start.hal"
 	  },
     "object": {
-      "href": "$HAL_ROOT/object.hal"
+      "href": "$RESOURCES_DIR/object.hal"
     },
     "array": {
-      "href": "$HAL_ROOT/array.hal"
+      "href": "$RESOURCES_DIR/array.hal"
     }
   },
   "_embedded": {
@@ -41,7 +41,7 @@
 	    {
 	      "_links": {
 	        "self": {
-	          "href": "$HAL_ROOT/empty.json",
+	          "href": "$RESOURCES_DIR/empty.json",
               "type": "application/json"
 			}
 	      },
@@ -52,7 +52,7 @@
 	    {
 	      "_links": {
 	        "self": {
-	          "href": "$HAL_ROOT/null.json",
+	          "href": "$RESOURCES_DIR/null.json",
               "type": "application/json"
 			}
 	      },
@@ -63,7 +63,7 @@
 		{
 	      "_links": {
 	        "self": {
-	          "href": "$HAL_ROOT/number.json",
+	          "href": "$RESOURCES_DIR/number.json",
               "type": "application/json"
 			}
 	      },
@@ -74,7 +74,7 @@
 	    {
 	      "_links": {
 	        "self": {
-	          "href": "$HAL_ROOT/string.json",
+	          "href": "$RESOURCES_DIR/string.json",
               "type": "application/json"
 			}
 	      },
@@ -86,7 +86,7 @@
     "object": {
       "_links": {
         "self": {
-          "href": "$HAL_ROOT/object.hal",
+          "href": "$RESOURCES_DIR/object.hal",
           "type": "application/hal+json"
 		}
       },
@@ -97,7 +97,7 @@
     "array": {
       "_links": {
         "self": {
-          "href": "$HAL_ROOT/array.hal",
+          "href": "$RESOURCES_DIR/array.hal",
           "type": "application/hal+json"
 		}
       },

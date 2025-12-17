@@ -1,55 +1,160 @@
 [
+  {},
   {
-    "_links": {
-      "self": {
-        "href": "$HAL_ROOT/start.hal",
-        "type": "application/hal+json"
+    "null": null
+  },
+  {
+    "true": true
+  },
+  {
+    "false": false
+  },
+  {
+    "number": 42
+  },
+  {
+    "string": "Single string HAL resource"
+  },
+  {
+    "description": "This resource contains simple JSON object without links and embedded resource.",
+    "title": "simple resources",
+    "links": 0,
+    "embeddeds": 0
+  },
+  {
+  "_links": {
+    "self": {
+      "href": "$RESOURCES_DIR/object.hal",
+      "type": "application/hal+json"
+	},
+    "simple": [
+	  {
+        "href": "$RESOURCES_DIR/empty.json",
+        "name": "empty",
+        "type": "application/json"
       },
-	  "simple": [
+      {
+        "href": "$RESOURCES_DIR/null.json",
+        "name": "null",
+        "type": "application/json"
+      },
+      {
+        "href": "$RESOURCES_DIR/false.json",
+        "name": "false",
+        "type": "application/json"
+      },
+      {
+        "href": "$RESOURCES_DIR/true.json",
+        "name": "true",
+        "type": "application/json"
+      },
+      {
+        "href": "$RESOURCES_DIR/number.json",
+        "name": "number",
+        "type": "application/json"
+      },
+      {
+        "href": "$RESOURCES_DIR/string.json",
+        "name": "string",
+        "type": "application/json"
+      }
+    ],
+    "start": {
+      "href": "$RESOURCES_DIR/start.hal"
+	  },
+    "object": {
+      "href": "$RESOURCES_DIR/object.hal"
+    },
+    "array": {
+      "href": "$RESOURCES_DIR/array.hal"
+    }
+  },
+  "_embedded": {
+    "simple": [
 	    {
-		    "href": "$HAL_ROOT/empty.json",
-			"name": "simple",
-            "type": "application/json"
-		},
+	      "_links": {
+	        "self": {
+	          "href": "$RESOURCES_DIR/empty.json",
+              "type": "application/json"
+			}
+	      },
+		  "title": "empty resource",
+		  "links": 0,
+		  "embeddeds": 0
+	    },
 	    {
-			"href": "$HAL_ROOT/null.json",
-			"name": "null",
-            "type": "application/json"
+	      "_links": {
+	        "self": {
+	          "href": "$RESOURCES_DIR/null.json",
+              "type": "application/json"
+			}
+	      },
+		  "title": "null resource",
+		  "links": 0,
+		  "embeddeds": 0
 	    },
 		{
-			"href": "$HAL_ROOT/number.json",
-			"name": "number",
-            "type": "application/json"
+	      "_links": {
+	        "self": {
+	          "href": "$RESOURCES_DIR/number.json",
+              "type": "application/json"
+			}
+	      },
+		  "title": "number resource",
+		  "links": 0,
+		  "embeddeds": 0
 		},
 	    {
-			"href": "$HAL_ROOT/string.json",
-			"name": "string",
-            "type": "application/json"
+	      "_links": {
+	        "self": {
+	          "href": "$RESOURCES_DIR/string.json",
+              "type": "application/json"
+			}
+	      },
+		  "title": "string resource",
+		  "links": 0,
+		  "embeddeds": 0
 	    }
-	  ],
-	  "object": {
-	    "href": "$HAL_ROOT/object.hal",
-        "type": "application/hal+json"
-	  },
-	  "array": {
-	    "href": "$HAL_ROOT/array.hal",
-        "type": "application/hal+json"
-	  }
+	],
+    "object": {
+      "_links": {
+        "self": {
+          "href": "$RESOURCES_DIR/object.hal",
+          "type": "application/hal+json"
+		}
+      },
+	  "title": "single object resources",
+	  "links": 5,
+	  "embeddeds": 4
     },
-	"title": "first"
+    "array": {
+      "_links": {
+        "self": {
+          "href": "$RESOURCES_DIR/array.hal",
+          "type": "application/hal+json"
+		}
+      },
+	  "title": "collection of  resources",
+	  "links": 5,
+	  "embeddeds": 4
+    }
   },
-  {
-    "_links": {
-      "href": "$HAL_ROOT/object.hal",
-      "type": "application/hal+json"
+  "array": [
+    {
+      "null": null
     },
-	"title": "second"
-  },
-  {
-    "_links": {
-      "href": "$HAL_ROOT/array.hal",
-      "type": "application/hal+json"
+    {
+      "true": true
     },
-	"title": "third"
+    {
+      "false": false
+    },
+    {
+      "number": 42
+    },
+    {
+      "string": "Single string HAL resource"
+    }
+  ]
   }
 ]

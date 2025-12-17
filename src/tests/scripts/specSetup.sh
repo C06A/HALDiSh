@@ -13,7 +13,7 @@ setup() {
   subf=$1
 
   SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" >/dev/null 2>&1 && pwd)"
-  RESOURCES_DIR="$(cd -- $SCRIPT_DIR/../resources >/dev/null 2>&1 && pwd)"
+  RESOURCES_DIR="file://$(cd -- $SCRIPT_DIR/../resources >/dev/null 2>&1 && pwd)"
 
   cd $SCRIPT_DIR/../../../build
   [ -e "deployed" ] || mkdir deployed

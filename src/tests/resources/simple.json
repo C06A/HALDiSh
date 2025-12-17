@@ -1,0 +1,6 @@
+{
+  "description": "This resource contains simple JSON object without links and embedded resource.",
+  "title": "simple resources",
+  "links": 0,
+  "embeddeds": 0
+}

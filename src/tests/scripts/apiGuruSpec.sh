@@ -47,8 +47,8 @@ getProvider() {
 # end::sourcingValidator[]
 
 PREV_NAME=providers
-API_GURU_PROVIDERS=$(jq -r "._links.\"$PREV_NAME\".href" $RESOURCES_DIR/apiGuru.hal )
-API_GURU_TEMPLATE=$(jq -r "._links.endpoint.href" $RESOURCES_DIR/apiGuru.hal )
+API_GURU_PROVIDERS=$(jq -r "._links.\"$PREV_NAME\".href" $SCRIPT_DIR/../resources/apiGuru.hal )
+API_GURU_TEMPLATE=$(jq -r "._links.endpoint.href" $SCRIPT_DIR/../resources/apiGuru.hal )
 
 GET "$API_GURU_PROVIDERS" 2>/dev/null | rename.sh "$PREV_NAME" 2>/dev/null \
   | adoc.sh 2>/dev/null >"$ASCII_DOC_FILE"
