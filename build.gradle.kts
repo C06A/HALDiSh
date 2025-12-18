@@ -119,6 +119,7 @@ val scriptDir = layout.projectDirectory.dir("src/tests/scripts")
 tasks.register<Exec>("testAdocSpec") {
     group = "verification"
     description = "Runs the adocSpec.sh test script"
+    dependsOn("buildArchive")
 
     workingDir = scriptDir.asFile
 
@@ -130,6 +131,7 @@ tasks.register<Exec>("testAdocSpec") {
 tasks.register<Exec>("testGETSpec") {
     group = "verification"
     description = "Runs the GETSpec.sh test script"
+    dependsOn("buildArchive")
 
     workingDir = scriptDir.asFile
     commandLine("/bin/sh", scriptDir.file("GETSpec.sh").asFile.absolutePath)
@@ -138,6 +140,7 @@ tasks.register<Exec>("testGETSpec") {
 tasks.register<Exec>("testRenameSpec") {
     group = "verification"
     description = "Runs the renameSpec.sh test script"
+    dependsOn("buildArchive")
 
     workingDir = scriptDir.asFile
     commandLine("/bin/sh", scriptDir.file("renameSpec.sh").asFile.absolutePath)
@@ -146,6 +149,7 @@ tasks.register<Exec>("testRenameSpec") {
 tasks.register<Exec>("testUriTEnginSpec") {
     group = "verification"
     description = "Runs the uritenginSpec.sh test script"
+    dependsOn("buildArchive")
 
     workingDir = scriptDir.asFile
     commandLine("/bin/sh", scriptDir.file("uritenginSpec.sh").asFile.absolutePath)
