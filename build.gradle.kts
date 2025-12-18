@@ -3,6 +3,7 @@ import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.util.Base64
+import org.gradle.api.tasks.Exec
 
 plugins {
     id("maven-publish")
@@ -19,23 +20,23 @@ val selfExtractingArchive = file("$buildDir/distributions/$archiveName-$version.
 
 tasks.register("prepareArchive") {
     description = "Prepare scripts for archiving"
-    
+
     doLast {
         delete(buildArchiveDir)
         mkdir(buildArchiveDir)
-        
+
         // Copy all scripts from src/main/scripts
         copy {
             from(scriptsDir)
             into(buildArchiveDir)
         }
-        
+
         // Ensure init.sh is present
         val initScript = file("$buildArchiveDir/init.sh")
         if (!initScript.exists()) {
             throw GradleException("init.sh must exist in src/main/scripts")
         }
-        
+
         // Make all scripts executable
         fileTree(buildArchiveDir).forEach { file ->
             file.setExecutable(true)
@@ -46,7 +47,7 @@ tasks.register("prepareArchive") {
 tasks.register<Exec>("createTarball") {
     dependsOn("prepareArchive")
     description = "Create tarball of scripts"
-    
+
     workingDir = buildArchiveDir.parentFile
     commandLine("tar", "czf", "scripts.tar.gz", "-C", buildArchiveDir.name, ".")
 
@@ -59,14 +60,15 @@ tasks.register<Exec>("createTarball") {
 tasks.register("buildSelfExtractingArchive") {
     dependsOn("createTarball")
     description = "Build self-extracting archive that auto-executes init.sh"
-    
+
     doLast {
         val tarball = file("$buildDir/archive.tar.gz")
         val outputDir = selfExtractingArchive.parentFile
         mkdir(outputDir)
-        
+
         // Create the self-extracting script
-        selfExtractingArchive.writeText("""#!/bin/bash
+        selfExtractingArchive.writeText(
+            """#!/bin/bash
 # Self-extracting archive created by Gradle
 # This archive will automatically extract and execute init.sh
 
@@ -97,18 +99,60 @@ rm -rf "${'$'}EXTRACT_DIR"
 exit ${'$'}EXIT_CODE
 
 __ARCHIVE_BELOW__
-""")
-        
+"""
+        )
+
         // Append the tarball
         tarball.inputStream().use { input ->
             selfExtractingArchive.appendBytes(input.readBytes())
         }
-        
+
         // Make executable
         selfExtractingArchive.setExecutable(true)
-        
+
         println("Self-extracting archive created: ${selfExtractingArchive.absolutePath}")
     }
+}
+
+val scriptDir = layout.projectDirectory.dir("src/tests/scripts")
+
+tasks.register<Exec>("testAdocSpec") {
+    group = "verification"
+    description = "Runs the adocSpec.sh test script"
+
+    workingDir = scriptDir.asFile
+
+    doFirst {
+        commandLine("/bin/sh", scriptDir.file("adocSpec.sh").asFile.absolutePath)
+    }
+}
+
+tasks.register<Exec>("testGETSpec") {
+    group = "verification"
+    description = "Runs the GETSpec.sh test script"
+
+    workingDir = scriptDir.asFile
+    commandLine("/bin/sh", scriptDir.file("GETSpec.sh").asFile.absolutePath)
+}
+
+tasks.register<Exec>("testRenameSpec") {
+    group = "verification"
+    description = "Runs the renameSpec.sh test script"
+
+    workingDir = scriptDir.asFile
+    commandLine("/bin/sh", scriptDir.file("renameSpec.sh").asFile.absolutePath)
+}
+
+tasks.register<Exec>("testUriTEnginSpec") {
+    group = "verification"
+    description = "Runs the uritenginSpec.sh test script"
+
+    workingDir = scriptDir.asFile
+    commandLine("/bin/sh", scriptDir.file("uritenginSpec.sh").asFile.absolutePath)
+}
+
+tasks.named("check") {
+    dependsOn("testAdocSpec", "testGETSpec", "testRenameSpec", "testUriTEnginSpec")
 }
 
 tasks.named("assemble") {
@@ -135,27 +179,29 @@ publishing {
     publications {
         create<MavenPublication>("mavenJava") {
             artifactId = archiveName
-            
+
             artifact(selfExtractingArchive) {
                 extension = "sh"
             }
-            
+
 //            artifact(tasks["sourcesJar"])
 //            artifact(tasks["javadocJar"])
-            
+
             pom {
                 name.set("HALDiSh")
-                description.set("""A self-extracting archive that
-                     contains a bash scripts to help discover the HAL remote server API.""")
+                description.set(
+                    """A self-extracting archive that
+                     contains a bash scripts to help discover the HAL remote server API."""
+                )
                 url.set("https://github.com/C06A/HALDiSh")
-                
+
                 licenses {
                     license {
                         name.set("The Apache License, Version 2.0")
                         url.set("http://www.apache.org/licenses/LICENSE-2.0.txt")
                     }
                 }
-                
+
                 developers {
                     developer {
                         id.set("C06A")
@@ -163,7 +209,7 @@ publishing {
                         email.set("maven@helpchoice.com")
                     }
                 }
-                
+
                 scm {
                     connection.set("scm:git:git://github.com/C06A/HALDiSh.git")
                     developerConnection.set("scm:git:ssh://github.com/C06A/HALDiSh.git")
@@ -192,7 +238,7 @@ publishing {
             name = "OSSRH"
 //            val releasesRepoUrl = uri("https://s01.oss.sonatype.org/service/local/staging/deploy/maven2/")
             val releasesRepoUrl = uri(
-            "https://ossrh-staging-api.central.sonatype.com/service/local/staging/deploy/maven2/"
+                "https://ossrh-staging-api.central.sonatype.com/service/local/staging/deploy/maven2/"
             )
 //            val snapshotsRepoUrl = uri("https://s01.oss.sonatype.org/content/repositories/snapshots/")
             val snapshotsRepoUrl = uri(
