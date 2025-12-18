@@ -11,7 +11,7 @@ plugins {
 }
 
 group = "com.helpchoice.hal"
-version = "0.1.0"
+version = "1.0.0"
 
 val archiveName = "HALDiSh"
 val scriptsDir = file("src/main/scripts")
