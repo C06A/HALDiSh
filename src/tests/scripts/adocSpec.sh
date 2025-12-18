@@ -3,6 +3,16 @@
 . $(cd -- "$(dirname -- "$0")" >/dev/null 2>&1 && pwd)/specSetup.sh
 setup adoc
 
+pass=0
+fail=0
+tests=0
+
+# Simple colors (works on most terminals; safe fallback)
+RED="$(printf '\033[31m')"
+GRN="$(printf '\033[32m')"
+YEL="$(printf '\033[33m')"
+RST="$(printf '\033[0m')"
+
 cat >test.first <<EOF
 This is a first section
 EOF
@@ -51,9 +61,11 @@ ends=$(grep "end::" output.adoc | wc -l )
 
 if [ $tags -eq 6 ] && [ $ends -eq 6 ]
 then
-  echo success -- adoc.sh
+  printf "%sPASS%s %-24s\n" "$GRN" "$RST" "ASCIIdoc combined file created successfuly"
+  exit 0
 else
   grep "tag::" output.adoc
   grep "end::" output.adoc
-  echo failure -- adoc.sh
+  printf "%sFAIL%s %-24s\n" "$RED" "$RST" "Fail to create proper ASCIIdoc file"
+  exit 1
 fi

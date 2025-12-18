@@ -109,7 +109,7 @@ get $(eval echo $(jq -r ".[7]._links.self.href" array.body)) "array_object" >/de
 report $? 'object resource get via link in the array resource' 'object resource get via link in the array resource do not match one gotten directly'
 
 get $(eval echo $(jq -r '.[7]._links.simple[] | select(.name == "empty") | .href' array.body)) "array_link_empty" >/dev/null
-[ $(diff start_empty.body array_empty.body | wc -l) -eq 0 ]
+[ $(diff start_empty.body array_link_empty.body | wc -l) -eq 0 ]
 report $? 'empty resource get via link in the array resource' 'empty resource get via link in the array resource do not match one gotten directly'
 
 
@@ -173,5 +173,5 @@ if [ "$fail" -eq 0 ]; then
   exit 0
 else
   printf "%s%d passed, %d failed (total %d).%s\n" "$YEL" "$pass" "$fail" "$tests" "$RST"
-  exit 1
+  exit "$fail"
 fi
