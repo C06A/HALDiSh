@@ -15,7 +15,7 @@ else
   echo no http.sh file in $(pwd)
 fi
 
-CHECKSUMCMD=$(./checksummer.sh $SCRIPT_DIR -e VALIDATOR_SCRIPT)
+CHECKSUMCMD=$(bash checksummer.sh $SCRIPT_DIR -e VALIDATOR_SCRIPT)
 CHECKSUM=$(eval $CHECKSUMCMD)
 
 cat >$VALIDATOR_SCRIPT <<EOF

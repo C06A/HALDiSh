@@ -23,7 +23,7 @@ run_test() {
 
   # Invoke script: template via stdin; args are the remaining "$@"
   local got
-  got="$(printf '%s' "$template" | "uritengin.sh" "$@")" || got="(exit $?)"
+  got="$(printf '%s' "$template" | uritengin.sh "$@")" || got="(exit $?)"
 
   if [ "$got" = "$expected" ]; then
     pass=$((pass+1))

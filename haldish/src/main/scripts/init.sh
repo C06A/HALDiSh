@@ -15,7 +15,7 @@ echo ""
 # Execute additional setup scripts if they exist
 if [ -f setup.sh ]; then
     echo "Running setup.sh..."
-    chmod +x setup.sh
+    chmod +x *.sh
     ./setup.sh "$@"
 fi
 

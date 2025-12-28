@@ -53,7 +53,7 @@ This file will be not included
 EOF
 
 
-adoc.sh test another 2>/dev/null | tee output.adoc >/dev/null
+adoc.sh test another 2>/dev/null >output.adoc
 
 tags=$(grep "tag::" output.adoc | wc -l )
 

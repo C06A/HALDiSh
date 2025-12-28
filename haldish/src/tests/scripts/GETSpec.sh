@@ -19,7 +19,7 @@ get() {
   local url=$1
   local name=$2
 
-  GET "$url" | rename.sh "$name" 2>/dev/null
+  GET "$url" | eval rename.sh "$name" 2>/dev/null
 }
 
 report() {
