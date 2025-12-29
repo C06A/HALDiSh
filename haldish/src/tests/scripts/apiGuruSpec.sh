@@ -9,6 +9,7 @@ VALIDATOR=$(dirname $(command -v validator.sh))
 
 API_GURU_PROVIDERS="https://api.apis.guru/v2/providers.json"
 API_GURU_TEMPLATE="https://api.apis.guru/v2{/endpoint}.json"
+ASCII_DOC_FILE="apiGuru.adoc"
 
 # tag::sampleApiGuru.sh[]
 #!/usr/bin/env bash
@@ -20,12 +21,12 @@ API_GURU_TEMPLATE="https://api.apis.guru/v2{/endpoint}.json"
 # Send the GET request to the $API_GURU_PROVIDERS URL,
 # rename all created files to have "providers" base name,
 # combine all thous files as tagged ranges in the $ASCII_DOC_FILE
-GET "$API_GURU_PROVIDERS" 2>/dev/null \
+GET "$API_GURU_PROVIDERS" \
     | rename.sh "providers" 2>/dev/null \
-    | adoc.sh 2>/dev/null >"$ASCII_DOC_FILE"
+    | adoc.sh >"$ASCII_DOC_FILE"
 
-# Extract the name of the first API from the list
-API_NAME=$(jq -r .data[1] "providers.body" )
+# Extract the name of API from the list
+API_NAME=$(jq -r .data[7] "providers.body" )
 
 # Take the URI template from the environment variable $API_GURU_TEMPLATE,
 # insert the $API_NAME value as an endpoint expression,
@@ -34,18 +35,18 @@ API_NAME=$(jq -r .data[1] "providers.body" )
 # and finally append them into $ASCII_DOC_FILE file
 echo "$API_GURU_TEMPLATE" \
     | uritengin.sh endpoint="$API_NAME" \
-    | GET -- 2>/dev/null \
+    | GET -- \
     | rename.sh "$API_NAME" 2>/dev/null \
-    | adoc.sh 2>/dev/null >>"$ASCII_DOC_FILE"
+    | adoc.sh >>"$ASCII_DOC_FILE"
 
 # Extract URL to get the Logo image
-LOGO_FILE=$(jq -r ".apis.\"$API_NAME\".info.\"x-logo\".url" "$API_NAME.body" )
+LOGO_FILE=$(jq -r ".apis.\"$API_NAME\".info.\"x-logo\".url" "$API_NAME.body")
 
 # Delete created files as they are not needed any more
-rm "$API_NAME."*
+rm "$API_NAME."* "providers."*
 
 # Send request to the Logo URL and rename resulting files
-GET "$LOGO_FILE" 2>/dev/null \
+GET "$LOGO_FILE" \
     | rename.sh "${API_NAME}_logo" >/dev/null 2>&1
 
 # Because this service doesn't support HAL, the type of the Logo image
@@ -60,3 +61,7 @@ mv "${API_NAME}_logo.body" "$API_NAME.$LOGO_EXT"
 # Remove unneeded files
 rm "${API_NAME}_logo."*
 # end::sampleApiGuru.sh[]
+
+ls -a1 $(pwd)/*
+open "$API_NAME.$LOGO_EXT"
+less "$ASCII_DOC_FILE"
