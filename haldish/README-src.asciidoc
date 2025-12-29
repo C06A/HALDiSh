@@ -1,5 +1,5 @@
 
-## HAL-DIscovering SHell scripts
+## HAL-DIscovering SHell scripts project
 
 This project contains BASH shell scripts to do HTTP requests to the server
 and to extract information from the response.
@@ -76,7 +76,7 @@ For example:
 
 [source,bash]
 ----
-. $VALIDATOR/validator.sh >/dev/null
+include::src/tests/scripts/specSetup.sh[tag=sourcingValidator]
 ----
 
 This would be an only line, referencing the script from this package with explicit path. All follow calls to other script can be done by a name only.
@@ -109,3 +109,6 @@ The next step may repeat similar pipeline starting with extracting the next link
 from the downloaded resource.
 
 For more information about each script, see the comments at the beginning of the script.
+
+The example script included in the Readme file on the top level.
+More examples are located in the `example` module.
