@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-. $(cd -- "$(dirname -- "$0")" >/dev/null 2>&1 && pwd)/specSetup.sh
+. $(cd -- "$(dirname -- "$0")" >/dev/null 2>&1 && pwd)/setup.sh
 setup apiGuru
 
 [ $(ls -l ./* 2>/dev/null| wc -l) -le 0 ] || rm ./*

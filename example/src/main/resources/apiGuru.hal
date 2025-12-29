@@ -1,7 +1,7 @@
 {
   "_links": {
     "self": {
-      "href": "file:///$TEST_DIR/apiGuru.hal",
+      "href": "$RESOURCES_DIR/apiGuru.hal",
       "type": "application/hal+json"
     },
     "providers": {

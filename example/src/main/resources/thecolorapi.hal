@@ -1,7 +1,7 @@
 {
   "_links": {
     "self": {
-      "href": "file:///$TEST_DIR/thecolotapi.hal"
+      "href": "$RESOURCES_DIR/thecolotapi.hal"
       "type": "application/hal+json"
     },
     "color": {

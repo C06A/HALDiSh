@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-. $(cd -- "$(dirname -- "$0")" >/dev/null 2>&1 && pwd)/specSetup.sh
+. $(cd -- "$(dirname -- "$0")" >/dev/null 2>&1 && pwd)/setup.sh
 setup thecolorapi
 
 [ $(ls -1 | wc -l) -eq 0 ] || rm ./*

@@ -1,14 +1,6 @@
 plugins {
     // Not strictly needed, but keeps a standard module
-    kotlin("jvm") version "2.0.21"
-}
-
-repositories {
-    mavenCentral()
-    // (Optional while artifact is a SNAPSHOT)
-    maven("https://s01.oss.sonatype.org/content/repositories/snapshots/") {
-        mavenContent { snapshotsOnly() }
-    }
+    id("base")
 }
 
 // Resolvable configuration to fetch the .sh
@@ -20,14 +12,14 @@ val haldish by configurations.creating {
 
 dependencies {
     // IMPORTANT: @sh makes Gradle fetch the .sh artifact
-    haldish("com.helpchoice.hal:haldish:1.0.0-SNAPSHOT@sh")
+    haldish("com.helpchoice.hal:HALDiSh:1.1.0@sh")
 }
 
 val halWorkingDir = layout.buildDirectory.dir("haldish")
 
-val runHaldish by tasks.registering {
+val installHaldish by tasks.registering {
     group = "example"
-    description = "Resolve haldish.sh and execute it with workingDir=build/haldish."
+    description = "Resolve HALDiSh.sh and execute it with workingDir=build/haldish."
     inputs.files(haldish)
     outputs.dir(halWorkingDir)
 
@@ -44,5 +36,5 @@ val runHaldish by tasks.registering {
 }
 
 tasks.named("build") {
-    dependsOn(runHaldish)
+    dependsOn(installHaldish)
 }

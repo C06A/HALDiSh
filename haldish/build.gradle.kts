@@ -10,13 +10,10 @@ plugins {
     id("signing")
 }
 
-group = "com.helpchoice.hal"
-version = "1.0.0"
-
 val archiveName = "HALDiSh"
 val scriptsDir = file("src/main/scripts")
-val buildArchiveDir = file("$buildDir/archive")
-val selfExtractingArchive = file("$buildDir/distributions/$archiveName-$version.sh")
+val buildArchiveDir = layout.buildDirectory.dir("archive").get().asFile
+val selfExtractingArchive = layout.buildDirectory.dir("distributions/$archiveName-$version.sh").get().asFile
 
 tasks.register("prepareArchive") {
     description = "Prepare scripts for archiving"
@@ -52,7 +49,7 @@ tasks.register<Exec>("createTarball") {
     commandLine("tar", "czf", "scripts.tar.gz", "-C", buildArchiveDir.name, ".")
 
     doLast {
-        val tarball = file("$buildDir/archive.tar.gz")
+        val tarball = layout.buildDirectory.dir("archive.tar.gz").get().asFile
         file("${buildArchiveDir.parent}/scripts.tar.gz").renameTo(tarball)
     }
 }
@@ -62,7 +59,7 @@ tasks.register("buildSelfExtractingArchive") {
     description = "Build self-extracting archive that auto-executes init.sh"
 
     doLast {
-        val tarball = file("$buildDir/archive.tar.gz")
+        val tarball = layout.buildDirectory.dir("archive.tar.gz").get().asFile
         val outputDir = selfExtractingArchive.parentFile
         mkdir(outputDir)
 
