@@ -24,7 +24,7 @@
 # The script uses follow environment variables, if set:
 # -- HTTP_IN_HEADERS may contain HTTP headers, to send with request. Each header occupies separate line.
 # -- HTTP_IN_HEADERS_FILE may contain the file path/name, where each line contains a separate header.
-# -- HTTP_IN_COOKIES may contain HTTP cookies, to send with request. Each header occupies separate line.
+# -- HTTP_IN_COOKIES may contain HTTP cookies, to send with request. Each cookie occupies separate line.
 # -- HTTP_IN_COOKIES_FILE may contain the file path/name, where each line contains a separate cookie.
 #
 

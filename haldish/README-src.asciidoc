@@ -1,10 +1,14 @@
 
 ## HAL-DIscovering SHell scripts
 
-This project contains BASH shell scripts to HTTP requests to the server
-and extract information from the response. These scripts can be combined into
+This project contains BASH shell scripts to do HTTP requests to the server
+and to extract information from the response.
+
+These scripts can be combined into
 common scenarios like Login, SSO, etc. or to execute and validate manual
 or semi-automated tests.
+It also could create the ASCIIdoc document with tagged ranges to include into
+API documentation.
 
 
 ### Project Structure
@@ -36,11 +40,11 @@ or semi-automated tests.
 The distribution self-extracting archive include all scripts from the
 `src/main/scripts` folder and when executed:
 
-- Extracts all scripts to a temporary directory
-- Automatically executes `init.sh`
-- Passes any command-line arguments to `init.sh`
-- The `init.sh` also calls `setup.sh` script, which:
-- create hardlink for `http.sh` script with HTTP Methods as names
+* Extracts all scripts to a temporary directory
+* Automatically executes `init.sh`
+* Passes any command-line arguments to `init.sh`
+* The `init.sh` also calls `setup.sh` script, which:
+- create hardlinks to the `http.sh` script with HTTP Methods as names
 - prepares the validation values to check that these scripts were not altered
 - Cleans up temporary files after execution
 
@@ -56,7 +60,7 @@ like sed, awk, etc.
 
 Most scripts are designed as a UNIX filters, so they take data from the STDIN,
 apply some manipulations, and passing the result to the STDOUT.
-This means that these scripts can be combined into the pipeline.
+This allows to combine these scripts into the pipeline.
 
 
 #### Validation of the installation
@@ -72,10 +76,10 @@ For example:
 
 [source,bash]
 ----
-include::src/tests/scripts/apiGuruSpec.sh[tag=sourcingValidator]
+include::src/tests/scripts/GETSpec.sh[tag=sourcingValidator]
 ----
 
-This would be an only line, referencing the script form this package explicitly. All follow calls to other script can be done by a name only.
+This would be an only line, referencing the script from this package with explicit path. All follow calls to other script can be done by a name only.
 
 
 #### Usage of the scripts
@@ -105,11 +109,3 @@ The next step may repeat similar pipeline starting with extracting the next link
 from the downloaded resource.
 
 For more information about each script, see the comments at the beginning of the script.
-
-Here is the example, accessing the list of Providers in apiGuru site
-and the first Provider from the list.
-
-[source,bash]
-----
-include::src/tests/scripts/apiGuruSpec.sh[tag=sampleApiGuru.sh]
-----

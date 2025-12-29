@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
+
 # uritengin.sh — RFC 6570-like URI Template expander (subset)
 # Bash 3.x+ compatible (no associative arrays).
-# Reads template from STDIN; variables from command-line args: key=value
-# Arrays: key=v1|v2|v3
-# Dicts:  key=k1:v1|k2:v2
+#
+# Reads template from STDIN; variables -- from the command-line args
+# -- Simple value: key=value
+# --       Arrays: key=v1|v2|v3
+# --        Dicts:  key=k1:v1|k2:v2
+#
 # Supported operators: {var} {+var} {#var} {.var} {/var} {;var} {?var} {&var}
 # Each supports explode modifier * (per var), and multiple vars per expression.
 #

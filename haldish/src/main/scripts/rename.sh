@@ -6,6 +6,7 @@
 #   - One arg: ./rename.sh old_name (new_name from STDIN)
 # Outputs:
 #   - Success or error messages to STDERR
+#   - new_name to the STDOUT if successful
 #
 
 # Read arguments or stdin

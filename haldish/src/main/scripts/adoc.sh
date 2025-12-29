@@ -4,13 +4,18 @@
 # Usage:
 #   - With args: adoc.sh name1 name2 ...
 #   - No args: adoc.sh reads the names (without extensions) from STDIN
-# For each name, collects all files with that name and any extension,
+# For each name, it collects all files with that name and any extensions,
 # and outputs their contents as ASCIIdoc tagged regions.
-# The files' names become the corresponding tags.
+# The files' names (including the extension) become the corresponding tags.
 #
 # Outputs:
 #   - ASCIIdoc tagged content to STDOUT
 #   - Errors to STDERR
+#
+# To save the created ASCIIdoc file, the script should redirect STDOUT into the file.
+# NOTE: Be aware that the resulting file should not have the same base name as any names,
+#       passed to the script. Otherwise it may create infinite loop.
+#
 
 # Function to process a single file name
 process_name() {
