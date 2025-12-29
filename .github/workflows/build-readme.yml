@@ -60,6 +60,20 @@ jobs:
           sudo apt-get install -y pandoc
           gem install asciidoctor
 
+      - name: Generate README.md from haldish/README-src.asciidoc
+        if: steps.diff.outputs.changed == 'true'
+        run: |
+          HEADER="<!-- AUTO-GENERATED FILE — DO NOT EDIT.
+          -- Edit haldish/README-src.asciidoc and let CI regenerate this file.
+          -->
+
+          "
+          # Asciidoctor expands includes/tags → DocBook → Pandoc → GitHub-flavored Markdown
+          asciidoctor -b docbook -o - haldish/README-src.asciidoc \
+            | pandoc -f docbook -t gfm -o haldish/README.md
+
+          printf "%s\n%s" "$HEADER" "$(cat haldish/README.md)" > haldish/README.md
+
       - name: Generate README.md from README-src.asciidoc
         if: steps.diff.outputs.changed == 'true'
         run: |
