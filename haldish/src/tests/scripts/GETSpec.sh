@@ -3,12 +3,6 @@
 . $(cd -- "$(dirname -- "$0")" >/dev/null 2>&1 && pwd)/specSetup.sh
 setup get
 
-VALIDATOR=$(dirname $(command -v validator.sh))
-
-# tag::sourcingValidator[]
-. $VALIDATOR/validator.sh >/dev/null
-# end::sourcingValidator[]
-
 set +e
 
 pass=0

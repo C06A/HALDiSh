@@ -76,7 +76,7 @@ For example:
 
 [source,bash]
 ----
-include::src/tests/scripts/GETSpec.sh[tag=sourcingValidator]
+. $VALIDATOR/validator.sh >/dev/null
 ----
 
 This would be an only line, referencing the script from this package with explicit path. All follow calls to other script can be done by a name only.
