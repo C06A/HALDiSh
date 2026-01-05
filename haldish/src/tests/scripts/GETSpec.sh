@@ -157,7 +157,7 @@ get "https://one.one.one.one/cdn-cgi/trace" "one-trace" >/dev/null
 [ $(ls -l one-trace.* | wc -l) -eq 6 ] \
 && [ "$(cat one-trace.code)" == '200' ] \
 && [ "$(cat one-trace.url)" == 'https://one.one.one.one/cdn-cgi/trace' ] \
-&& [ "$(cat one-trace.curl)" == 'curl -X GET "https://one.one.one.one/cdn-cgi/trace"' ] \
+&& [ "$(cat one-trace.curl)" == 'curl -k -X GET "https://one.one.one.one/cdn-cgi/trace"' ] \
 && [ $(cat one-trace.headers | wc -l) -eq 10 ] \
 && [ $(cat one-trace.cookies | wc -l) -eq 0 ] \
 && [ $(cat one-trace.body | wc -l) -eq 16 ]

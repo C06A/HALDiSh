@@ -71,7 +71,7 @@ trap "rm -f $TEMP_HEADERS $TEMP_RESPONSE" EXIT
 echo -e $URL >"$URL_FILE"
 
 # Build curl command
-CURL_CMD="curl -X $HTTP_METHOD"
+CURL_CMD="curl -k -X $HTTP_METHOD"
 
 # Add URL
 CURL_CMD="$CURL_CMD \"$URL\""
