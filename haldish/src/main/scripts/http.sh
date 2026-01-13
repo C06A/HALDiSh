@@ -107,19 +107,47 @@ fi
 # Handle body/files
 shift # Remove URL from arguments
 
-if [ "$1" == "--" ]; then
-    # No files specified, use STDIN as body
-    CURL_CMD="$CURL_CMD --data-binary @-"
-else
-    # Multiple files specified, send as multipart
-    for file in "$@"; do
-        if [ -f "$file" ]; then
-            CURL_CMD="$CURL_CMD -F \"file=@$file\""
-        else
-            echo "Warning: File not found: $file" >&2
-        fi
-    done
-fi
+while [ $# -gt 0 ]
+do
+  unset data
+
+  if [ $# -eq 1 ]
+  then
+    file=$1
+  else
+    case "$1" in
+      "-")
+        data="--data"
+      ;;
+      "-a")
+        data="--data-ascii"
+      ;;
+      "-b")
+        data="--data-binary"
+      ;;
+      "-r")
+        data="--data-raw"
+      ;;
+      "-u")
+        data="--data-urlencode"
+      ;;
+    esac
+  fi
+  if [ -z "$data" ]
+  then
+    file=$1
+    if [ -f "$file" ]
+    then
+      CURL_CMD="$CURL_CMD -F \"file=@$file\""
+    else
+      echo "Warning: File not found: $file" >&2
+    fi
+  else
+    CURL_CMD="$CURL_CMD $data $2"
+    shift
+  fi
+  shift
+done
 
 # Save curl command to file
 echo "$CURL_CMD" > "$CURL_CMD_FILE"
