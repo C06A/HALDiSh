@@ -6,7 +6,7 @@
 # Reads template from STDIN; variables -- from the command-line args
 # -- Simple value: key=value
 # --       Arrays: key=v1|v2|v3
-# --        Dicts:  key=k1:v1|k2:v2
+# --        Dicts:  key=k1::v1|k2::v2
 #
 # Supported operators: {var} {+var} {#var} {.var} {/var} {;var} {?var} {&var}
 # Each supports explode modifier * (per var), and multiple vars per expression.
@@ -14,8 +14,9 @@
 # Notes:
 # - Save/restore IFS carefully when splitting.
 # - Unprovided variables are skipped; expression removed if it yields no output.
-# - Encoding preserves unreserved: [A-Za-z0-9.~_-]; everything else -> %XX.
+# - Value encoding preserves unreserved: [A-Za-z0-9.~_-]; everything else -> %XX.
 # - Reserved expansion {+...} and fragment {#...} skip encoding (per this script).
+#
 
 set -e
 
@@ -48,7 +49,7 @@ for arg in "$@"; do
       v="${arg#*=}"
       k="$(_trim_quotes "$k")"
       v="$(_trim_quotes "$v")"
-      if printf '%s' "$v" | grep -q ':'; then
+      if printf '%s' "$v" | grep -q '::'; then
         var_types[${#var_keys[@]}]="dict"
       elif printf '%s' "$v" | grep -q '|'; then
         var_types[${#var_keys[@]}]="array"

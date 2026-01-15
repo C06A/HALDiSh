@@ -5,7 +5,7 @@
 #   - Two args: ./rename.sh new_name old_name
 #   - One arg: ./rename.sh old_name (new_name from STDIN)
 # Outputs:
-#   - Success or error messages to STDERR
+#   - Listing files renamed in case of success or error message to STDERR
 #   - new_name to the STDOUT if successful
 #
 

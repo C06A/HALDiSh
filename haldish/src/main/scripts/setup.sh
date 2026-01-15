@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 
+# The script, automatically executed by the self-inflating script
+# right after the archive was expended.
+#
+
 VALIDATOR_SCRIPT=validator.sh
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"

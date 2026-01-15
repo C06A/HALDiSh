@@ -12,7 +12,7 @@ val haldish by configurations.creating {
 
 dependencies {
     // IMPORTANT: @sh makes Gradle fetch the .sh artifact
-    haldish("com.helpchoice.hal:HALDiSh:1.2.1@sh")
+    haldish("com.helpchoice.hal:HALDiSh:1.2.2@sh")
 }
 
 val halWorkingDir = layout.buildDirectory.dir("haldish")

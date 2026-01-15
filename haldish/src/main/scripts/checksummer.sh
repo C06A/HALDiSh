@@ -1,6 +1,8 @@
 #!/usr/bin/env sh
+
 # Compute a single SHA-256 checksum from the concatenation of all files,
 # excluding patterns. Portable to Linux/macOS with POSIX /bin/sh.
+#
 
 set -eu
 
@@ -39,26 +41,35 @@ while [ $# -gt 0 ]; do
       [ $# -ge 2 ] || { echo "Missing argument for $1" >&2; exit 2; }
       EXCLUDE_PATTERNS="${EXCLUDE_PATTERNS}
 $2"
-      shift 2 ;;
+      shift 2
+    ;;
     -E|--exclude-from)
       [ $# -ge 2 ] || { echo "Missing argument for $1" >&2; exit 2; }
       [ -f "$2" ] || { echo "Exclude file not found: $2" >&2; exit 2; }
       while IFS= read -r line || [ -n "$line" ]; do
         case "$line" in
-          ''|'#'*) continue ;;
+          ''|'#'*) continue
+        ;;
           *) EXCLUDE_PATTERNS="${EXCLUDE_PATTERNS}
-$line" ;;
+$line"
+        ;;
         esac
       done < "$2"
-      shift 2 ;;
-    --) shift; break ;;
+      shift 2
+    ;;
+    --)
+      shift
+      break
+    ;;
     -*)
       echo "Unknown option: $1" >&2
       usage
-      exit 2 ;;
+      exit 2
+    ;;
     *)
       DIR="$1"
-      shift ;;
+      shift
+    ;;
   esac
 done
 

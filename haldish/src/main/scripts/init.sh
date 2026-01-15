@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
+
 # init.sh - Initialization script that runs automatically after extraction
 #
 # This script takes no parameters, makes all shell script exectutable,
 # and if presented, runs setup.sh script from the same folder
+#
 
 set -e
 

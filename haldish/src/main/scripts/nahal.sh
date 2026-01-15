@@ -1,5 +1,13 @@
 #!/usr/bin/env bash
-# nahal.sh — interactive navigator for HAL-based APIs (HALDiSh-compatible)
+
+# nahal.sh — interactive navigator for HAL-based APIs
+#
+# This script accepts a single command line argument as an entry URL
+# and one option "-p" with path to the plugin script (see sample-plugin.sh for contract and example)
+#
+# When running, this script sent GET request to provided URL and start navigation with returned HAL resource.
+# For each HAL resource, this script prompt user to navigate the resource or send request to one of its links.
+#
 
 set -euo pipefail
 

@@ -3,29 +3,38 @@
 # This script sends the HTTP request to the provided URL.
 # It uses the name of the script as an HTTP Method,
 # sets headers and cookies from environment variables or files,
-# and, if provided, the body of the request from STDIN.
-# The parts of the request and respond are saved to separate files
-# for the future use.
-# The base name of the created files is combined from the domain name
-# of the URL and current timestamp to make it unique.
+# and, if provided, the body of the request from STDIN or files.
+#
+# The parts of the request and respond are saved to separate files for the future use.
+# The base name of the created files is combined from the domain name of the URL
+# and current timestamp (to make it unique).
 #
 # The first argument is the URL to send request to.
 # If the first argument is '--', the script reads URL from STDIN.
+# This can be used for the GET and DELETE request without body
+# or if the body contains multipart files.
 #
 # The rest of the command line arguments (optional) are the files,
-# to be sent as a body. If the value is '--' the content of STDIN
-# will be sent as a body. If command contains more than 1 file,
-# all their contents will be sent as multi-part body.
-# If no files provided by the command, the request will contain no body.
+# to be sent as a body. If before the file name there is one of the follow arguments:
+#    -  : send file content AS-IS (--data)
+#    -a : send file content as ASCII text (--data-ascii)
+#    -b : send file content as binary stream (--data-binary)
+#    -r : send file content AS-IS, but cannot be redirected from file/STDIN (--data-raw)
+#    -u : send file content after URL-encode it (--data-urlencode)
 #
-# The script saves parts of the request and response in separate files
-# with relevant extensions.
+# Without any of these arguments the file will be included as a multipart.
+#
+# If the name of the file starts with '@' prefix (except -r), it points to the file,
+# to take content from. If the file name is '@-' (except -r), the content will be taken
+# from the STDIN.
+#
+# The script saves parts of the request and response in separate files with relevant extensions.
 #
 # The script uses follow environment variables, if set:
-# -- HTTP_IN_HEADERS may contain HTTP headers, to send with request. Each header occupies separate line.
-# -- HTTP_IN_HEADERS_FILE may contain the file path/name, where each line contains a separate header.
-# -- HTTP_IN_COOKIES may contain HTTP cookies, to send with request. Each cookie occupies separate line.
-# -- HTTP_IN_COOKIES_FILE may contain the file path/name, where each line contains a separate cookie.
+#   -- HTTP_IN_HEADERS may contain HTTP headers, to send with request. Each header occupies separate line.
+#   -- HTTP_IN_HEADERS_FILE may contain the file path/name, where each line contains a separate header.
+#   -- HTTP_IN_COOKIES may contain HTTP cookies, to send with request. Each cookie occupies separate line.
+#   -- HTTP_IN_COOKIES_FILE may contain the file path/name, where each line contains a separate cookie.
 #
 
 # Determine HTTP method from script name
