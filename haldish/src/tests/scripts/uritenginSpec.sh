@@ -85,13 +85,13 @@ run_test "path-array-no-explode" \
 run_test "path-dict-explode" \
   "/base{/params*}" \
   "/base/k1=v1/k2=v%202" \
-  "params=k1:v1|k2:v 2"
+  "params=k1::v1|k2::v 2"
 
 # 9. Path dict no explode {/params}
 run_test "path-dict-no-explode" \
   "/base{/params}" \
   "/base/k1,v1,k2,v%202" \
-  "params=k1:v1|k2:v 2"
+  "params=k1::v1|k2::v 2"
 
 # 10. Path-style ; simple
 run_test "matrix-simple" \
@@ -115,13 +115,13 @@ run_test "matrix-array-no-explode" \
 run_test "matrix-dict-explode" \
   "/p{;params*}" \
   "/p;k1=v1;k2" \
-  "params=k1:v1|k2:"
+  "params=k1::v1|k2::"
 
 # 14. Path-style ; dict no explode
 run_test "matrix-dict-no-explode" \
   "/p{;params}" \
   "/p;params=k1,v1,k2," \
-  "params=k1:v1|k2:"
+  "params=k1::v1|k2::"
 
 # 15. Query {?} simple with encoding
 run_test "query-simple" \
@@ -145,13 +145,13 @@ run_test "query-array-no-explode" \
 run_test "query-dict-explode" \
   "{?p*}" \
   "?a=1&b=2" \
-  "p=a:1|b:2"
+  "p=a::1|b::2"
 
 # 19. Query dict no explode {?p}
 run_test "query-dict-no-explode" \
   "{?p}" \
   "?p=a,1,b,2" \
-  "p=a:1|b:2"
+  "p=a::1|b::2"
 
 # 20. Query continuation {&var}
 run_test "query-cont" \

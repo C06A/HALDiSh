@@ -223,7 +223,7 @@ EOF
           # expand to k=v & k=v
           local pair k v
           while IFS= read -r pair; do
-            k="${pair%%:*}"; v="${pair#*:}"
+            k="${pair%%::*}"; v="${pair#*::}"
             query_pairs[${#query_pairs[@]}]="$(_enc_kv "$k" "$v" 0)"
             has_any=1
           done <<EOF
@@ -233,7 +233,7 @@ EOF
           # single parameter name=k,v,k,v (each item encoded, joined by commas; don't re-encode)
           local acc="" pair k v
           while IFS= read -r pair; do
-            k="${pair%%:*}"; v="${pair#*:}"
+            k="${pair%%::*}"; v="${pair#*::}"
             [ -n "$acc" ] && acc="$acc,"
             acc="$acc$(_url_encode "$k" 0),$(_url_encode "$v" 0)"
           done <<EOF
@@ -289,7 +289,7 @@ EOF
         if [ "$explode" = "1" ]; then
           local pair k v
           while IFS= read -r pair; do
-            k="${pair%%:*}"; v="${pair#*:}"
+            k="${pair%%::*}"; v="${pair#*::}"
             if [ -n "$v" ]; then
               matrix_parts[${#matrix_parts[@]}]=";$(_url_encode "$k" 0)=$(_url_encode "$v" 0)"
             else
@@ -302,7 +302,7 @@ EOF
         else
           local acc="" pair k v
           while IFS= read -r pair; do
-            k="${pair%%:*}"; v="${pair#*:}"
+            k="${pair%%::*}"; v="${pair#*::}"
             [ -n "$acc" ] && acc="$acc,"
             acc="$acc$(_url_encode "$k" 0),$(_url_encode "$v" 0)"
           done <<EOF
@@ -339,7 +339,7 @@ EOF
         if [ "$explode" = "1" ]; then
           local pair k v
           while IFS= read -r pair; do
-            k="${pair%%:*}"; v="${pair#*:}"
+            k="${pair%%::*}"; v="${pair#*::}"
             parts[${#parts[@]}]="/$(_enc_kv "$k" "$v" 0)"; has_any=1
           done <<EOF
 $(_split_dict_pairs "$raw")
@@ -347,7 +347,7 @@ EOF
         else
           local acc="" pair k v
           while IFS= read -r pair; do
-            k="${pair%%:*}"; v="${pair#*:}"
+            k="${pair%%::*}"; v="${pair#*::}"
             [ -n "$acc" ] && acc="$acc,"
             acc="$acc$(_url_encode "$k" 0),$(_url_encode "$v" 0)"
           done <<EOF
@@ -383,7 +383,7 @@ EOF
         if [ "$explode" = "1" ]; then
           local pair k v
           while IFS= read -r pair; do
-            k="${pair%%:*}"; v="${pair#*:}"
+            k="${pair%%::*}"; v="${pair#*::}"
             parts[${#parts[@]}]=".$(_enc_kv "$k" "$v" 0)"; has_any=1
           done <<EOF
 $(_split_dict_pairs "$raw")
@@ -391,7 +391,7 @@ EOF
         else
           local acc="" pair k v
           while IFS= read -r pair; do
-            k="${pair%%:*}"; v="${pair#*:}"
+            k="${pair%%::*}"; v="${pair#*::}"
             [ -n "$acc" ] && acc="$acc,"
             acc="$acc$(_url_encode "$k" 0),$(_url_encode "$v" 0)"
           done <<EOF
@@ -427,7 +427,7 @@ EOF
         if [ "$explode" = "1" ]; then
           local pair k v
           while IFS= read -r pair; do
-            k="${pair%%:*}"; v="${pair#*:}"
+            k="${pair%%::*}"; v="${pair#*::}"
             if [ "$operator" = "+" ]; then
               # For reserved (+) with dict explode, use "k:v" pairs (no encoding in this script)
               parts[${#parts[@]}]="$(_url_encode "$k" "$reserved_mode"):$(_url_encode "$v" "$reserved_mode")"; has_any=1
@@ -440,7 +440,7 @@ EOF
         else
           local acc="" pair k v
           while IFS= read -r pair; do
-            k="${pair%%:*}"; v="${pair#*:}"
+            k="${pair%%::*}"; v="${pair#*::}"
             [ -n "$acc" ] && acc="$acc,"
             acc="$acc$(_url_encode "$k" "$reserved_mode"),$(_url_encode "$v" "$reserved_mode")"
           done <<EOF
