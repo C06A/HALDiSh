@@ -14,28 +14,31 @@ print(d.get('tool_name', ''))
 
 [[ -z "$tool_name" ]] && exit 0
 
-# Build a human-readable action summary
+# Build a human-readable action summary, with paths relative to the project root
 summary=$(printf '%s' "$input" | python3 -c "
-import sys, json
+import sys, json, os
 d    = json.load(sys.stdin)
 name = d.get('tool_name', '')
 inp  = d.get('tool_input', {})
+cwd  = os.getcwd().rstrip('/') + '/'
+
+def rel(p):
+    return p[len(cwd):] if p.startswith(cwd) else p
 
 if name == 'Bash':
     desc = inp.get('description', '')
     cmd  = inp.get('command', '').split('\n')[0][:80]
     out  = desc if desc else cmd
 elif name == 'Read':
-    out = inp.get('file_path', '')
+    out = rel(inp.get('file_path', ''))
 elif name == 'Write':
-    out = 'Create ' + inp.get('file_path', '')
+    out = 'Create ' + rel(inp.get('file_path', ''))
 elif name == 'Edit':
-    out = 'Edit ' + inp.get('file_path', '')
+    out = 'Edit ' + rel(inp.get('file_path', ''))
 elif name == 'Glob':
     out = inp.get('pattern', '')
 elif name == 'Grep':
-    pat = inp.get('pattern', '')
-    out = 'Search \`' + pat + '\`'
+    out = 'Search \`' + inp.get('pattern', '') + '\`'
 elif name == 'Skill':
     out = 'Invoke /' + inp.get('skill', '')
 elif name == 'Agent':
@@ -66,4 +69,4 @@ else:
 
 [[ -z "$decision" ]] && decision="auto-approved"
 
-printf '| \`%s\` | %s | %s |\n' "$tool_name" "$summary" "$decision" >> "$LOG"
+printf '| `%s` | %s | %s |\n' "$tool_name" "$summary" "$decision" >> "$LOG"

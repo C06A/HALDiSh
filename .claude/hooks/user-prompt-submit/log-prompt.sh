@@ -16,11 +16,11 @@ print(d.get('prompt', ''))
 
 date_str=$(date '+%Y-%m-%d %H:%M')
 
-# Determine next prompt number — use python3 + grep -E for macOS compatibility
-last_num=$(grep -E '^### Prompt [0-9]+' "$LOG" 2>/dev/null \
-    | grep -Eo '[0-9]+' \
-    | sort -n \
-    | tail -1 || true)
+# Extract the prompt number: match digits immediately after "### Prompt "
+# and before the first non-digit (space/underscore/end), so timestamps in
+# the same line are never picked up.
+last_num=$(sed -n 's/^### Prompt \([0-9][0-9]*\)[^0-9].*/\1/p' "$LOG" 2>/dev/null \
+    | sort -n | tail -1 || true)
 next_num=$(( ${last_num:-0} + 1 ))
 
 cat >> "$LOG" <<EOF
