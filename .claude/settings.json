@@ -34,6 +34,14 @@
             "command": "bash .claude/hooks/post-tool-use/notify-test-result.sh"
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/post-tool-use/log-tool-use.sh"
+          }
+        ]
       }
     ]
   }
