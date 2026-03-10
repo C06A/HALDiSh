@@ -25,7 +25,7 @@ fi
 # ── verify key files are present ─────────────────────────────────────────────
 _info "Verifying installation in: ${HAL_PREFIX}"
 missing=0
-for f in hal_utils.sh; do
+for f in hal_utils.sh env.sh; do
     if [[ -f "${HAL_PREFIX}/${f}" ]]; then
         _ok  "Found ${f}"
     else
@@ -36,11 +36,10 @@ done
 
 (( missing > 0 )) && { _warn "Installation incomplete — ${missing} file(s) missing."; exit 1; }
 
-# ── shell profile hint ────────────────────────────────────────────────────────
+# ── usage hint ───────────────────────────────────────────────────────────────
 _ok  "Installation complete."
 printf '\n'
-_info "To use the library, add this to your shell profile (~/.bashrc / ~/.zshrc):"
+_info "To use the library, source the activation script from your script or session:"
 printf '\n'
-printf '  export HAL_LIB_DIR="%s"\n' "${HAL_PREFIX}"
-printf '  source "%s/hal_utils.sh"\n' "${HAL_PREFIX}"
+printf '  source "%s/env.sh"\n' "${HAL_PREFIX}"
 printf '\n'
