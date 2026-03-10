@@ -37,8 +37,10 @@ _extract() {
         | base64 -d \
         | tar -xzf - -C "$prefix"
 
-    echo "Done. Source the library with:"
-    echo "  source '${prefix}/hal_utils.sh'"
+    local setup="${prefix}/setup.sh"
+    if [[ -f "$setup" ]]; then
+        bash "$setup" "$prefix"
+    fi
     exit 0
 }
 
