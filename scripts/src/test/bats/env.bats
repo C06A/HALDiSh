@@ -51,6 +51,24 @@ teardown() {
     [ -z "${_hal_env_dir+x}" ]
 }
 
+@test "env.sh adds the install directory to PATH" {
+    source "${TEST_DIR}/env.sh"
+    [[ ":${PATH}:" == *":${TEST_DIR}:"* ]]
+}
+
+@test "env.sh does not duplicate PATH entry when sourced twice" {
+    source "${TEST_DIR}/env.sh"
+    source "${TEST_DIR}/env.sh"
+    count=$(tr ':' '\n' <<< "$PATH" | grep -cxF "${TEST_DIR}")
+    [ "$count" -eq 1 ]
+}
+
+@test "env.sh allows scripts to be called by name after sourcing" {
+    source "${TEST_DIR}/env.sh"
+    run which menu.sh
+    [ "$status" -eq 0 ]
+}
+
 # ── integrity gate ────────────────────────────────────────────────────────────
 
 @test "env.sh returns 1 when a file has been modified" {

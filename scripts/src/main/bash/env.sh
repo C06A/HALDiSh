@@ -28,4 +28,11 @@ export HAL_LIB_DIR="${_hal_env_dir}"
 # shellcheck source=hal_utils.sh
 source "${HAL_LIB_DIR}/hal_utils.sh"
 
+# Add the library directory to PATH so scripts (e.g. menu.sh) can be invoked
+# by name without a full path. Avoid duplicating the entry if already present.
+case ":${PATH}:" in
+    *":${HAL_LIB_DIR}:"*) ;;
+    *) export PATH="${HAL_LIB_DIR}:${PATH}" ;;
+esac
+
 unset _hal_env_dir
