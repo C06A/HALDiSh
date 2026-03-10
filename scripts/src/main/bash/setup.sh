@@ -25,7 +25,7 @@ fi
 # ── verify key files are present ─────────────────────────────────────────────
 _info "Verifying installation in: ${HAL_PREFIX}"
 missing=0
-for f in hal_utils.sh env.sh; do
+for f in hal_utils.sh env.sh validate.sh; do
     if [[ -f "${HAL_PREFIX}/${f}" ]]; then
         _ok  "Found ${f}"
     else
@@ -35,6 +35,19 @@ for f in hal_utils.sh env.sh; do
 done
 
 (( missing > 0 )) && { _warn "Installation incomplete — ${missing} file(s) missing."; exit 1; }
+
+# ── integrity manifest ────────────────────────────────────────────────────────
+_info "Generating integrity manifest…"
+manifest="${HAL_PREFIX}/.hal_manifest"
+(
+    cd "${HAL_PREFIX}"
+    if command -v shasum >/dev/null 2>&1; then
+        find . -name "*.sh" | sort | xargs shasum -a 256
+    else
+        find . -name "*.sh" | sort | xargs sha256sum
+    fi
+) > "${manifest}"
+_ok "Manifest written ($(wc -l < "${manifest}" | tr -d ' ') files checksummed)."
 
 # ── usage hint ───────────────────────────────────────────────────────────────
 _ok  "Installation complete."
