@@ -1,0 +1,11 @@
+# Gradle build outputs
+.gradle/
+build/
+**/build/
+
+# macOS
+.DS_Store
+
+# Claude Code — ignore local override file and session log
+.claude/settings.local.json
+.claude/session-log.md
