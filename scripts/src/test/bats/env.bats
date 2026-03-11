@@ -84,6 +84,12 @@ teardown() {
     bash -c "source '${TEST_DIR}/env.sh'; [ -z \"\${HAL_LIB_DIR+x}\" ]"
 }
 
+@test "env.sh allows uritemplate.sh to be found by name after sourcing" {
+    source "${TEST_DIR}/env.sh"
+    run which uritemplate.sh
+    [ "$status" -eq 0 ]
+}
+
 @test "env.sh returns 1 when manifest is missing" {
     rm "${TEST_DIR}/.hal_manifest"
     run bash -c "source '${TEST_DIR}/env.sh'"
