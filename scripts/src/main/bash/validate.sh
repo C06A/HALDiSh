@@ -57,6 +57,23 @@ while IFS= read -r line; do
     fi
 done < "${_HAL_MANIFEST}"
 
+# ── verify method hardlinks ──────────────────────────────────────────────────
+# GET POST PUT PATCH OPTIONS DELETE must exist and match .httpreq.sh exactly.
+_httpreq="${_HAL_DIR}/.httpreq.sh"
+if [[ -f "${_httpreq}" ]]; then
+    _httpreq_hash="$(_sha256 "${_httpreq}")"
+    for _m in GET POST PUT PATCH OPTIONS DELETE; do
+        _mfile="${_HAL_DIR}/${_m}"
+        if [[ ! -f "${_mfile}" ]]; then
+            _err "MISSING method: ${_m}"
+            (( fail++ )) || true
+        elif [[ "$(_sha256 "${_mfile}")" != "${_httpreq_hash}" ]]; then
+            _err "MODIFIED method: ${_m}"
+            (( fail++ )) || true
+        fi
+    done
+fi
+
 # ── result ────────────────────────────────────────────────────────────────────
 if (( fail > 0 )); then
     _err "${fail} file(s) failed integrity check. Aborting."

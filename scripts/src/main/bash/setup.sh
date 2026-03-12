@@ -34,17 +34,44 @@ for f in hal_utils.sh env.sh validate.sh; do
     fi
 done
 
+# httpreq.sh may already have been renamed to .httpreq.sh on a prior setup run
+if [[ -f "${HAL_PREFIX}/httpreq.sh" || -f "${HAL_PREFIX}/.httpreq.sh" ]]; then
+    _ok  "Found httpreq.sh"
+else
+    _warn "Missing httpreq.sh"
+    (( missing++ )) || true
+fi
+
 (( missing > 0 )) && { _warn "Installation incomplete — ${missing} file(s) missing."; exit 1; }
+
+# ── hide implementation and create method hardlinks ───────────────────────────
+# Rename httpreq.sh → .httpreq.sh so method names (GET, POST, …) are the
+# only public entry points.  Uses hardlinks so each name shares content with
+# the hidden file; validate.sh checksums all of them independently.
+if [[ -f "${HAL_PREFIX}/httpreq.sh" ]]; then
+    _info "Renaming httpreq.sh → .httpreq.sh…"
+    mv "${HAL_PREFIX}/httpreq.sh" "${HAL_PREFIX}/.httpreq.sh"
+fi
+_info "Creating method hardlinks…"
+for _m in GET POST PUT PATCH OPTIONS DELETE; do
+    ln -f "${HAL_PREFIX}/.httpreq.sh" "${HAL_PREFIX}/${_m}"
+    _ok  "  ${_m} → .httpreq.sh"
+done
 
 # ── integrity manifest ────────────────────────────────────────────────────────
 _info "Generating integrity manifest…"
 manifest="${HAL_PREFIX}/.hal_manifest"
 (
     cd "${HAL_PREFIX}"
+    _files=()
+    while IFS= read -r f; do _files+=("$f"); done < <(find . -name "*.sh" | sort)
+    for _m in GET POST PUT PATCH OPTIONS DELETE; do
+        [[ -f "./${_m}" ]] && _files+=("./${_m}")
+    done
     if command -v shasum >/dev/null 2>&1; then
-        find . -name "*.sh" | sort | xargs shasum -a 256
+        shasum -a 256 "${_files[@]}"
     else
-        find . -name "*.sh" | sort | xargs sha256sum
+        sha256sum "${_files[@]}"
     fi
 ) > "${manifest}"
 _ok "Manifest written ($(wc -l < "${manifest}" | tr -d ' ') files checksummed)."

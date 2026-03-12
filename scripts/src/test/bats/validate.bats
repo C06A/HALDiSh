@@ -5,11 +5,12 @@
 
 load 'test_helper'
 
-# Populate a temp install dir with all scripts and a freshly-generated manifest.
+# Populate a temp install dir via setup.sh to get the full post-install state:
+# .httpreq.sh, method hardlinks, and a correct manifest.
 setup() {
     TEST_DIR="$(mktemp -d)"
     cp "${SCRIPTS_DIR}"/*.sh "${TEST_DIR}/"
-    _make_manifest
+    bash "${TEST_DIR}/setup.sh" "${TEST_DIR}" >/dev/null 2>&1
 }
 
 teardown() {
@@ -17,13 +18,19 @@ teardown() {
 }
 
 # Helper: (re)generate the manifest the same way setup.sh does.
+# Includes both *.sh files and the method-named hardlinks.
 _make_manifest() {
     (
         cd "${TEST_DIR}"
+        _files=()
+        while IFS= read -r f; do _files+=("$f"); done < <(find . -name "*.sh" | sort)
+        for _m in GET POST PUT PATCH OPTIONS DELETE; do
+            [[ -f "./${_m}" ]] && _files+=("./${_m}")
+        done
         if command -v shasum >/dev/null 2>&1; then
-            find . -name "*.sh" | sort | xargs shasum -a 256
+            shasum -a 256 "${_files[@]}"
         else
-            find . -name "*.sh" | sort | xargs sha256sum
+            sha256sum "${_files[@]}"
         fi
     ) > "${TEST_DIR}/.hal_manifest"
 }
@@ -81,6 +88,20 @@ _make_manifest() {
     rm "${TEST_DIR}/hal_utils.sh"
     run bash "${TEST_DIR}/validate.sh"
     [[ "$output" =~ "hal_utils.sh" ]]
+}
+
+# ── method hardlinks ──────────────────────────────────────────────────────────
+
+@test "validate.sh exits 1 when a method hardlink is missing" {
+    rm "${TEST_DIR}/GET"
+    run bash "${TEST_DIR}/validate.sh"
+    [ "$status" -eq 1 ]
+}
+
+@test "validate.sh names the missing method in its output" {
+    rm "${TEST_DIR}/POST"
+    run bash "${TEST_DIR}/validate.sh"
+    [[ "$output" =~ "POST" ]]
 }
 
 # ── re-run after regenerating manifest ───────────────────────────────────────

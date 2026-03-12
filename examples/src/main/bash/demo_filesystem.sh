@@ -9,8 +9,8 @@ source "${LIB_DIR}/hal_utils.sh"
 
 hal::log::info "=== hal::fs demos ==="
 
-WORK_DIR="$(mktemp -d)"
-trap 'rm -rf "$WORK_DIR"' EXIT
+WORK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)/build/demo/filesystem"
+mkdir -p "$WORK_DIR"
 
 # ── mkdir_p ───────────────────────────────────────────────────────────────────
 hal::fs::mkdir_p "${WORK_DIR}/a/b/c"
