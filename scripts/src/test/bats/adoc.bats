@@ -1,0 +1,137 @@
+#!/usr/bin/env bats
+# =============================================================================
+# adoc.bats — unit tests for adoc.sh
+# =============================================================================
+
+bats_require_minimum_version 1.5.0
+
+load 'test_helper'
+
+ADOC_SH="${SCRIPTS_DIR}/adoc.sh"
+
+setup() {
+    WORK_DIR="$(mktemp -d)"
+}
+
+teardown() {
+    rm -rf "$WORK_DIR"
+}
+
+# Helper: run adoc.sh from WORK_DIR
+_adoc() {
+    run bash -c "cd '${WORK_DIR}' && bash '${ADOC_SH}' $(printf '%q ' "$@")"
+}
+
+# ── argument validation ───────────────────────────────────────────────────────
+
+@test "adoc: exits 0 with no output when no arguments and stdin is empty" {
+    run bash "$ADOC_SH" < /dev/null
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+}
+
+# ── tag format ────────────────────────────────────────────────────────────────
+
+@test "adoc: output contains opening tag comment" {
+    printf 'hello' > "${WORK_DIR}/foo.txt"
+    _adoc foo
+    [[ "$output" == *'// tag::foo.txt[]'* ]]
+}
+
+@test "adoc: output contains closing tag comment" {
+    printf 'hello' > "${WORK_DIR}/foo.txt"
+    _adoc foo
+    [[ "$output" == *'// end::foo.txt[]'* ]]
+}
+
+@test "adoc: tag name includes the file extension" {
+    printf 'content' > "${WORK_DIR}/base.status"
+    _adoc base
+    [[ "$output" == *'// tag::base.status[]'* ]]
+}
+
+@test "adoc: file content appears between tag and end markers" {
+    printf 'mycontent' > "${WORK_DIR}/foo.body"
+    _adoc foo
+    [[ "$output" == *'// tag::foo.body[]'*'mycontent'*'// end::foo.body[]'* ]]
+}
+
+# ── multiple files per base ───────────────────────────────────────────────────
+
+@test "adoc: emits a tagged region for each file in the group" {
+    printf '200'     > "${WORK_DIR}/req.status"
+    printf 'ok'      > "${WORK_DIR}/req.body"
+    _adoc req
+    [[ "$output" == *'// tag::req.status[]'* ]]
+    [[ "$output" == *'// tag::req.body[]'* ]]
+}
+
+@test "adoc: httpreq five-file group all appear in output" {
+    printf 'curl -X GET x' > "${WORK_DIR}/r.curl"
+    printf '200'            > "${WORK_DIR}/r.status"
+    printf 'X-Foo: bar'    > "${WORK_DIR}/r.headers"
+    printf 'tok=abc'        > "${WORK_DIR}/r.cookies"
+    printf '{"a":1}'        > "${WORK_DIR}/r.body"
+    _adoc r
+    [[ "$output" == *'// tag::r.curl[]'*    ]]
+    [[ "$output" == *'// tag::r.status[]'*  ]]
+    [[ "$output" == *'// tag::r.headers[]'* ]]
+    [[ "$output" == *'// tag::r.cookies[]'* ]]
+    [[ "$output" == *'// tag::r.body[]'*    ]]
+}
+
+# ── multiple base names ───────────────────────────────────────────────────────
+
+@test "adoc: processes multiple base names from arguments" {
+    printf 'a' > "${WORK_DIR}/foo.txt"
+    printf 'b' > "${WORK_DIR}/bar.txt"
+    _adoc foo bar
+    [[ "$output" == *'// tag::foo.txt[]'* ]]
+    [[ "$output" == *'// tag::bar.txt[]'* ]]
+}
+
+@test "adoc: reads multiple base names from stdin" {
+    printf 'a' > "${WORK_DIR}/foo.txt"
+    printf 'b' > "${WORK_DIR}/bar.txt"
+    run bash -c "cd '${WORK_DIR}' && printf 'foo\nbar\n' | bash '${ADOC_SH}'"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'// tag::foo.txt[]'* ]]
+    [[ "$output" == *'// tag::bar.txt[]'* ]]
+}
+
+@test "adoc: stdin mode skips blank lines" {
+    printf 'x' > "${WORK_DIR}/foo.txt"
+    run bash -c "cd '${WORK_DIR}' && printf '\nfoo\n\n' | bash '${ADOC_SH}'"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'// tag::foo.txt[]'* ]]
+}
+
+# ── no matching files ─────────────────────────────────────────────────────────
+
+@test "adoc: exits 0 when base name matches no files" {
+    _adoc nonexistent
+    [ "$status" -eq 0 ]
+}
+
+@test "adoc: produces no output when base name matches no files" {
+    _adoc nonexistent
+    [ -z "$output" ]
+}
+
+# ── content fidelity ──────────────────────────────────────────────────────────
+
+@test "adoc: preserves multi-line file content" {
+    printf 'line1\nline2\nline3' > "${WORK_DIR}/foo.body"
+    _adoc foo
+    [[ "$output" == *'line1'* ]]
+    [[ "$output" == *'line2'* ]]
+    [[ "$output" == *'line3'* ]]
+}
+
+@test "adoc: handles empty file without error" {
+    touch "${WORK_DIR}/foo.body"
+    _adoc foo
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'// tag::foo.body[]'* ]]
+    [[ "$output" == *'// end::foo.body[]'* ]]
+}
