@@ -1,3 +1,8 @@
+---
+name: commit-note
+description: Generate a commit message for currently staged changes
+---
+
 # Commit note
 
 Generate a commit message for the currently staged files.

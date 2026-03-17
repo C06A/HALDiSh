@@ -1,3 +1,8 @@
+---
+name: dist
+description: Build the self-inflatable shell archive (.run file)
+---
+
 # Dist
 
 Build the self-inflatable shell archive (`.run` file) from the scripts module.
