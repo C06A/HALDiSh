@@ -1,4 +1,4 @@
-rootProject.name = 'HALDiSh'
+rootProject.name = "HALDiSh"
 
-include 'scripts'
-include 'examples'
+include("scripts")
+include("examples")
