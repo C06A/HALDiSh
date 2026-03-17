@@ -1,6 +1,6 @@
 // ─── paths ────────────────────────────────────────────────────────────────────
-def examplesDir = file("src/main/bash")
-def scriptsDir  = project(':scripts').file("src/main/bash")
+val examplesDir = file("src/main/bash")
+val scriptsDir  = project(":scripts").file("src/main/bash")
 
 // ─── lifecycle ────────────────────────────────────────────────────────────────
 
@@ -8,34 +8,34 @@ def scriptsDir  = project(':scripts').file("src/main/bash")
  * Runs every example script in src/main/bash/ with bash -n (syntax check)
  * so CI can verify they at least parse correctly.
  */
-tasks.register('check', Exec) {
-    group       = 'verification'
-    description = 'Syntax-checks all example bash scripts.'
+tasks.register<Exec>("check") {
+    group       = "verification"
+    description = "Syntax-checks all example bash scripts."
 
-    commandLine 'bash', '-c', """
+    commandLine("bash", "-c", """
         set -euo pipefail
         ERRORS=0
         for f in "${examplesDir}"/*.sh; do
-            printf 'Checking %s … ' "\$f"
-            if bash -n "\$f"; then
+            printf 'Checking %s … ' "${'$'}f"
+            if bash -n "${'$'}f"; then
                 echo OK
             else
                 echo FAIL
-                ERRORS=\$((ERRORS + 1))
+                ERRORS=${'$'}((ERRORS + 1))
             fi
         done
-        exit \$ERRORS
-    """.stripIndent()
+        exit ${'$'}ERRORS
+    """.trimIndent())
 }
 
-tasks.register('build') {
-    group       = 'build'
-    description = 'Assembles and checks this project.'
-    dependsOn 'check'
+tasks.register("build") {
+    group       = "build"
+    description = "Assembles and checks this project."
+    dependsOn("check")
 }
 
-tasks.register('clean', Delete) {
-    group       = 'build'
-    description = 'Deletes the build directory.'
-    delete buildDir
+tasks.register<Delete>("clean") {
+    group       = "build"
+    description = "Deletes the build directory."
+    delete(layout.buildDirectory)
 }

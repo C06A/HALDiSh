@@ -1,7 +1,7 @@
 allprojects {
-    group   = 'com.haldish'
-    version = '0.1.0'
+    group   = "com.haldish"
+    version = "0.1.0"
 }
 
 // Each subproject declares its own lifecycle tasks (clean, build, test, etc.)
-// in its own build.gradle file.
+// in its own build.gradle.kts file.
