@@ -1,5 +1,10 @@
 import java.util.Base64
 
+plugins {
+    `maven-publish`
+    signing
+}
+
 // ─── paths ────────────────────────────────────────────────────────────────────
 val srcDir      = file("src/main/bash")
 val testDir     = file("src/test/bats")
@@ -125,20 +130,102 @@ tasks.register("assembleDist") {
     }
 }
 
-tasks.register("assemble") {
-    group       = "build"
-    description = "Assembles the outputs of this project."
+// ─── publish ──────────────────────────────────────────────────────────────────
+
+/**
+ * Publishes the .run archive to Sonatype OSSRH (releases or snapshots).
+ *
+ * Required credentials — supply via ~/.gradle/gradle.properties or env vars:
+ *   mavenCentralUsername  / MAVEN_CENTRAL_USERNAME
+ *   mavenCentralPassword  / MAVEN_CENTRAL_PASSWORD
+ *   mavenCentralNamespace / MAVEN_CENTRAL_NAMESPACE  — Maven groupId (e.g. com.haldish)
+ *
+ * Required signing keys (in-memory PGP):
+ *   signingKeyFile  / SIGNING_KEY_FILE  — path to ASCII-armoured private key file
+ *   signingPassword / SIGNING_PASSWORD  — key passphrase
+ */
+publishing {
+    publications {
+        create<MavenPublication>("runArchive") {
+            groupId    = providers.gradleProperty("mavenCentralNamespace")
+                .orElse(providers.environmentVariable("MAVEN_CENTRAL_NAMESPACE"))
+                .orElse(project.group.toString()).get()
+            artifactId = rootProject.name.lowercase()
+
+            artifact(distDir.resolve(archiveName)) {
+                extension = "run"
+                builtBy("assembleDist")
+            }
+
+            pom {
+                name.set(rootProject.name)
+                description.set("HAL JSON/YAML/XML interactive navigator and bash utility library")
+                url.set("https://github.com/C06A/HALDiSh")
+
+                licenses {
+                    license {
+                        name.set("MIT License")
+                        url.set("https://opensource.org/licenses/MIT")
+                    }
+                }
+
+                developers {
+                    developer {
+                        id.set("C06A")
+                        name.set("C06A")
+                        url.set("https://github.com/C06A")
+                    }
+                }
+
+                scm {
+                    connection.set("scm:git:https://github.com/C06A/HALDiSh.git")
+                    developerConnection.set("scm:git:ssh://github.com/C06A/HALDiSh.git")
+                    url.set("https://github.com/C06A/HALDiSh")
+                }
+            }
+        }
+    }
+
+    repositories {
+        maven {
+            name = "sonatype"
+            val releasesUrl  = uri("https://s01.oss.sonatype.org/service/local/staging/deploy/maven2/")
+            val snapshotsUrl = uri("https://s01.oss.sonatype.org/content/repositories/snapshots/")
+            url = if (version.toString().endsWith("SNAPSHOT")) snapshotsUrl else releasesUrl
+
+            credentials {
+                username = providers.gradleProperty("mavenCentralUsername")
+                    .orElse(providers.environmentVariable("MAVEN_CENTRAL_USERNAME")).orNull
+                password = providers.gradleProperty("mavenCentralPassword")
+                    .orElse(providers.environmentVariable("MAVEN_CENTRAL_PASSWORD")).orNull
+            }
+        }
+    }
+}
+
+signing {
+    val signingKeyFile = providers.gradleProperty("signingKeyFile")
+        .orElse(providers.environmentVariable("SIGNING_KEY_FILE")).orNull
+    val signingPassword = providers.gradleProperty("signingPassword")
+        .orElse(providers.environmentVariable("SIGNING_PASSWORD")).orNull
+    if (signingKeyFile != null && signingPassword != null) {
+        useInMemoryPgpKeys(file(signingKeyFile).readText(), signingPassword)
+    }
+    sign(publishing.publications["runArchive"])
+}
+
+tasks.named("publishRunArchivePublicationToSonatypeRepository") {
     dependsOn("assembleDist")
 }
 
-tasks.register("build") {
-    group       = "build"
-    description = "Assembles and tests this project."
+tasks.named("assemble") {
+    dependsOn("assembleDist")
+}
+
+tasks.named("build") {
     dependsOn("assemble", "test")
 }
 
-tasks.register<Delete>("clean") {
-    group       = "build"
-    description = "Deletes the build directory."
+tasks.named<Delete>("clean") {
     delete(layout.buildDirectory)
 }
