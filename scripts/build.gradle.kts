@@ -154,7 +154,7 @@ publishing {
 
             artifact(distDir.resolve(archiveName)) {
                 extension = "run"
-                builtBy("assembleDist")
+                builtBy(tasks.named("assembleDist"))
             }
 
             pom {
@@ -210,13 +210,10 @@ signing {
         .orElse(providers.environmentVariable("SIGNING_PASSWORD")).orNull
     if (signingKeyFile != null && signingPassword != null) {
         useInMemoryPgpKeys(file(signingKeyFile).readText(), signingPassword)
+        sign(publishing.publications["runArchive"])
     }
-    sign(publishing.publications["runArchive"])
 }
 
-tasks.named("publishRunArchivePublicationToSonatypeRepository") {
-    dependsOn("assembleDist")
-}
 
 tasks.named("assemble") {
     dependsOn("assembleDist")
