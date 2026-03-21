@@ -6,11 +6,8 @@
 #
 #   source /path/to/haldish/env.sh
 #
-# Validates installation integrity before setting any environment variables.
-# Aborts with a non-zero return code if any file has been modified.
-#
 # After sourcing successfully, all hal::* functions are available and
-# HAL_LIB_DIR is set.
+# the library directory is prepended to PATH.
 # =============================================================================
 
 # ── guard: must be sourced ────────────────────────────────────────────────────
@@ -30,16 +27,14 @@ if ! bash "${_hal_env_dir}/validate.sh"; then
     return 1
 fi
 
-export HAL_LIB_DIR="${_hal_env_dir}"
-
 # shellcheck source=hal_utils.sh
-source "${HAL_LIB_DIR}/hal_utils.sh"
+source "${_hal_env_dir}/hal_utils.sh"
 
-# Add the library directory to PATH so scripts (e.g. menu.sh) can be invoked
-# by name without a full path. Avoid duplicating the entry if already present.
+# Prepend the library directory to PATH so all scripts can be invoked by name.
+# Avoid duplicating the entry if already present.
 case ":${PATH}:" in
-    *":${HAL_LIB_DIR}:"*) ;;
-    *) export PATH="${HAL_LIB_DIR}:${PATH}" ;;
+    *":${_hal_env_dir}:"*) ;;
+    *) export PATH="${_hal_env_dir}:${PATH}" ;;
 esac
 
 unset _hal_env_dir
