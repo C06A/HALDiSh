@@ -6,8 +6,7 @@
 #   uritemplate.sh <template> [var_binding...]
 #
 # Variable binding syntax:
-#   name=value        → string variable
-#   name[]=value      → list element (repeat to build a list)
+#   name=value        → string variable; repeat the flag to build a list
 #   name[field]=value → map entry
 #
 # Prints the expanded URI to stdout.
@@ -16,7 +15,7 @@
 #
 # Examples:
 #   uritemplate.sh 'http://example.com/{path}' 'path=index'
-#   uritemplate.sh '{/list*}' 'list[]=a' 'list[]=b' 'list[]=c'
+#   uritemplate.sh '{/list*}' 'list=a' 'list=b' 'list=c'
 #   uritemplate.sh '{?q,lang}' 'q=hello world' 'lang=en'
 # =============================================================================
 set -euo pipefail
@@ -119,8 +118,11 @@ _hal_uri_encode() {
 }
 
 # _hal_uri_parse_bindings [binding...]
-# Parses key=value, key[]=val, and key[field]=val bindings into the
+# Parses key=value and key[field]=val bindings into the
 # _HAL_URI_VARS, _HAL_URI_TYPES, and _HAL_URI_LIST_CNT global arrays.
+# Repeating the same plain key builds a list: first occurrence is stored as a
+# string; on the second occurrence the string is promoted to a list and each
+# subsequent occurrence appends another element.
 _hal_uri_parse_bindings() {
     local binding key value base field idx
 
@@ -129,15 +131,7 @@ _hal_uri_parse_bindings() {
         key="${binding%%=*}"
         value="${binding#*=}"
 
-        if [[ "$key" == *'[]' ]]; then
-            # List element: strip [] suffix, store at next available index
-            base="${key%\[\]}"
-            idx="${_HAL_URI_LIST_CNT[$base]:-0}"
-            _HAL_URI_VARS["${base}[${idx}]"]="$value"
-            _HAL_URI_TYPES["$base"]='list'
-            _HAL_URI_LIST_CNT["$base"]=$(( idx + 1 ))
-
-        elif [[ "$key" == *'['*']' ]]; then
+        if [[ "$key" == *'['*']' ]]; then
             # Map entry: key[field]=value
             base="${key%%\[*}"
             field="${key#*\[}"
@@ -146,9 +140,24 @@ _hal_uri_parse_bindings() {
             _HAL_URI_TYPES["$base"]='map'
 
         else
-            # Simple string
-            _HAL_URI_VARS["$key"]="$value"
-            _HAL_URI_TYPES["$key"]='string'
+            # Plain name: first occurrence → string; repeated → list
+            if [[ "${_HAL_URI_TYPES[$key]:-}" == 'string' ]]; then
+                # Promote: move the existing string value to index 0
+                _HAL_URI_VARS["${key}[0]"]="${_HAL_URI_VARS[$key]}"
+                unset "_HAL_URI_VARS[$key]"
+                _HAL_URI_LIST_CNT["$key"]=1
+                _HAL_URI_TYPES["$key"]='list'
+            fi
+
+            if [[ "${_HAL_URI_TYPES[$key]:-}" == 'list' ]]; then
+                idx="${_HAL_URI_LIST_CNT[$key]:-0}"
+                _HAL_URI_VARS["${key}[${idx}]"]="$value"
+                _HAL_URI_LIST_CNT["$key"]=$(( idx + 1 ))
+            else
+                # First occurrence
+                _HAL_URI_VARS["$key"]="$value"
+                _HAL_URI_TYPES["$key"]='string'
+            fi
         fi
     done
 }
