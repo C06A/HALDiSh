@@ -30,7 +30,7 @@ You can download it directly with Maven or Gradle, or retrieve it manually:
 [source,bash]
 ----
 # With curl via the Central repository search API
-curl -LO "https://repo1.maven.org/maven2/com/haldish/haldish/<version>/haldish-<version>.run"
+curl -LO "https://repo1.maven.org/maven2/com/helpchoice/haldish/<version>/haldish-<version>.run"
 ----
 
 == Installation
