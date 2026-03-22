@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# pre-commit — enforce README.md is generated, never hand-edited.
+#
+# Rules:
+#   1. If README.md is staged but README.asciidoc is not → reject the commit.
+#   2. If README.asciidoc is staged → convert to README.md and auto-stage it.
+#
+# Install via:  ./gradlew installGitHooks
+set -euo pipefail
+
+adoc_staged=$(git diff --cached --name-only | grep -c '^README\.asciidoc$' || true)
+md_staged=$(git diff --cached --name-only   | grep -c '^README\.md$'       || true)
+
+if [[ "$md_staged" -gt 0 && "$adoc_staged" -eq 0 ]]; then
+    printf 'error: README.md must not be edited directly.\n' >&2
+    printf '       Edit README.asciidoc instead — README.md is generated automatically.\n' >&2
+    exit 1
+fi
+
+if [[ "$adoc_staged" -gt 0 ]]; then
+    if ! command -v pandoc >/dev/null 2>&1; then
+        printf 'error: pandoc is required to convert README.asciidoc → README.md.\n' >&2
+        printf '       Install it from https://pandoc.org/installing.html\n' >&2
+        exit 1
+    fi
+    printf 'pre-commit: converting README.asciidoc → README.md\n'
+    pandoc README.asciidoc --from asciidoc --to gfm --output README.md
+    git add README.md
+fi

@@ -1,2 +1,4 @@
-rootProject.name = "haldish-root"
-include(":haldish", ":example")
+rootProject.name = "HALDiSh"
+
+include("scripts")
+include("examples")

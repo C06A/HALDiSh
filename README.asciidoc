@@ -1,0 +1,611 @@
+= HAL-DIscovering SHell scripts project
+:toc: left
+:toc-title: Contents
+:toclevels: 3
+:icons: font
+:source-highlighter: highlight.js
+:sectnums:
+
+A Bash library and toolkit for HTTP requests, HAL document navigation, and
+shell scripting utilities.  Everything ships as a single self-inflatable
+`.run` archive that requires nothing beyond Bash 4 and standard UNIX tools.
+
+== Getting the archive
+
+=== From GitHub Releases
+
+Download the latest `.run` archive from the
+https://github.com/C06A/HALDiSh/releases[Releases page]:
+
+[source,bash]
+----
+curl -LO https://github.com/C06A/HALDiSh/releases/latest/download/HALDiSh-<version>.run
+----
+
+=== From Maven Central
+
+The archive is also published to Maven Central under the project's group ID.
+You can download it directly with Maven or Gradle, or retrieve it manually:
+
+[source,bash]
+----
+# With curl via the Central repository search API
+curl -LO "https://repo1.maven.org/maven2/com/haldish/haldish/<version>/haldish-<version>.run"
+----
+
+== Installation
+
+The `.run` file is a self-inflatable archive.  Run it directly with Bash:
+
+[source,bash]
+----
+bash HALDiSh-<version>.run
+----
+
+By default the library is extracted to `~/.local/lib/haldish`.  Pass a custom
+prefix with `--prefix`:
+
+[source,bash]
+----
+bash HALDiSh-<version>.run --prefix /opt/haldish
+----
+
+The installer:
+
+1. Extracts all scripts to the prefix directory.
+2. Checks that Bash 4 or later is available.
+3. Creates the HTTP method entry-points (`GET`, `POST`, `PUT`, `PATCH`,
+   `OPTIONS`, `DELETE`).
+
+== Activation
+
+Source `env.sh` at the start of any shell session or script that uses the
+library.  This loads all utility functions and adds the library directory to
+`PATH`:
+
+[source,bash]
+----
+source ~/.local/lib/haldish/env.sh
+----
+
+After sourcing:
+
+* All `hal::*` functions are available in the current shell.
+* The library directory is prepended to `PATH`, so scripts such as `menu.sh`,
+  `hal.sh`, and the HTTP method entry-points can be invoked by name.
+
+== Library functions — `hal_utils.sh`
+
+After activation all functions are available in the current shell.  They
+follow the `hal::<namespace>::<name>` naming convention.
+
+=== String utilities — `hal::str::*`
+
+[cols="1,2,1",options="header"]
+|===
+|Function |Description |Example
+
+|`hal::str::trim <string>`
+|Remove leading and trailing whitespace.
+|`hal::str::trim "  hello  "` → `hello`
+
+|`hal::str::upper <string>`
+|Convert to uppercase.
+|`hal::str::upper "Hello"` → `HELLO`
+
+|`hal::str::lower <string>`
+|Convert to lowercase.
+|`hal::str::lower "HELLO"` → `hello`
+
+|`hal::str::length <string>`
+|Print the number of characters.
+|`hal::str::length "abc"` → `3`
+
+|`hal::str::contains <haystack> <needle>`
+|Return 0 if haystack contains needle, 1 otherwise.
+|`hal::str::contains "foobar" "oba"` → 0
+
+|`hal::str::starts_with <string> <prefix>`
+|Return 0 if string starts with prefix.
+|`hal::str::starts_with "hello" "he"` → 0
+
+|`hal::str::ends_with <string> <suffix>`
+|Return 0 if string ends with suffix.
+|`hal::str::ends_with "hello" "lo"` → 0
+
+|`hal::str::repeat <string> <n>`
+|Print string repeated n times.
+|`hal::str::repeat "ab" 3` → `ababab`
+|===
+
+=== Array utilities — `hal::arr::*`
+
+[cols="1,2,1",options="header"]
+|===
+|Function |Description |Example
+
+|`hal::arr::contains <needle> "${array[@]}"`
+|Return 0 if needle is an element of the array.
+|`hal::arr::contains "b" "a" "b" "c"` → 0
+
+|`hal::arr::join <sep> "${array[@]}"`
+|Join array elements with sep and print the result.
+|`hal::arr::join ", " "a" "b" "c"` → `a, b, c`
+|===
+
+=== Filesystem utilities — `hal::fs::*`
+
+[cols="1,2",options="header"]
+|===
+|Function |Description
+
+|`hal::fs::exists <path>`
+|Return 0 if path exists (file or directory).
+
+|`hal::fs::is_file <path>`
+|Return 0 if path is a regular file.
+
+|`hal::fs::is_dir <path>`
+|Return 0 if path is a directory.
+
+|`hal::fs::mkdir_p <path>`
+|Create directory and all parents; idempotent.
+
+|`hal::fs::extension <path>`
+|Print the file extension without the leading dot.
+
+|`hal::fs::basename_no_ext <path>`
+|Print the filename without directory or extension.
+|===
+
+=== Logging — `hal::log::*`
+
+All logging functions write to stderr.  Color output is disabled
+automatically when stderr is not connected to a terminal.
+
+[cols="1,2",options="header"]
+|===
+|Function |Description
+
+|`hal::log::info <message>`
+|Print a cyan `[INFO]` line.
+
+|`hal::log::ok <message>`
+|Print a green `[ OK ]` line.
+
+|`hal::log::warn <message>`
+|Print a yellow `[WARN]` line.
+
+|`hal::log::error <message>`
+|Print a red `[ERR ]` line.
+
+|`hal::log::die [exit-code] <message>`
+|Print an error and exit.  Default exit code is 1.
+|===
+
+== HTTP client
+
+After activation, the HTTP method entry-points (`GET`, `POST`, `PUT`, `PATCH`,
+`OPTIONS`, `DELETE`) are on `PATH` and can be called directly.  They are all
+entry-points into `httpreq.sh`.
+
+=== Basic usage
+
+[source,bash]
+----
+GET  'https://jsonplaceholder.typicode.com/posts/1'
+POST 'https://jsonplaceholder.typicode.com/posts' -u 'title=Hello' -u 'userId=1'
+----
+
+The URL can also be piped via stdin using the `--` sentinel:
+
+[source,bash]
+----
+echo 'https://jsonplaceholder.typicode.com/posts/1' | GET
+printf 'https://jsonplaceholder.typicode.com/posts\n' | POST -- -u 'title=Hello'
+----
+
+=== Output files
+
+Each invocation writes a group of files named `<domain>_<timestamp-ms>.*`:
+
+[cols="1,3",options="header"]
+|===
+|Extension |Content
+
+|`.curl`
+|Shell-quoted `curl` command that replays the exact request.
+
+|`.status`
+|HTTP status code (e.g. `200`).
+
+|`.headers`
+|Response headers, one `Name: Value` pair per line.
+
+|`.cookies`
+|Response cookies, one `name=value` pair per line.
+
+|`.body`
+|Raw response body.
+|===
+
+The base name (e.g. `jsonplaceholder.typicode.com_1711234567890`) is printed to stdout,
+making it easy to pipe into the file-management utilities.
+
+=== Request body options
+
+[cols="1,3",options="header"]
+|===
+|Flag |Description
+
+|`-a [text]`
+|Plain-text body (`--data`).  Omit text to read from stdin.
+
+|`-u [text]`
+|URL-encoded body (`--data-urlencode`).  Omit text to read from stdin.
+
+|`-f [file]`
+|Multipart file upload (`--form`).  Repeatable.  Omit file to read stdin.
+
+|`-b [file]`
+|Binary body from file (`--data-binary @file`).  Omit file to read stdin.
+
+|`-r [file]`
+|Raw upload (`--upload-file`).  Omit file to read stdin.
+|===
+
+=== Request headers and cookies
+
+Set request headers in the `HTTP_IN_HEADERS` environment variable (one
+`Name: Value` per line) or point `HTTP_IN_HEADERS_FILE` at a file with the
+same format.  Cookies work the same way via `HTTP_IN_COOKIES` /
+`HTTP_IN_COOKIES_FILE` (one `name=value` per line):
+
+[source,bash]
+----
+export HTTP_IN_HEADERS="Authorization: Bearer $TOKEN
+Accept: application/json"
+
+GET 'https://jsonplaceholder.typicode.com/users/1'
+----
+
+=== Including response headers in the replay
+
+Pass `-i` before the body flags to record `-i` in the saved `.curl` file so
+the replay shows response headers too:
+
+[source,bash]
+----
+GET 'https://jsonplaceholder.typicode.com/posts/1' -i
+----
+
+=== Pipeline example
+
+[source,bash]
+----
+source ~/.local/lib/haldish/env.sh
+
+base=$(GET 'https://jsonplaceholder.typicode.com/posts')
+echo "Status: $(cat "${base}.status")"
+hal.sh "${base}.body" properties id
+----
+
+== URI templates — `uritemplate.sh`
+
+Expands https://www.rfc-editor.org/rfc/rfc6570[RFC 6570] URI templates.
+
+=== Usage
+
+[source,bash]
+----
+uritemplate.sh <template> [var_binding...]
+uritemplate.sh -           [var_binding...]   # template from stdin
+echo '<template>' | uritemplate.sh [var_binding...]
+----
+
+Variable bindings use the following syntax:
+
+[cols="1,2",options="header"]
+|===
+|Syntax |Type
+
+|`name=value`
+|String variable.  Repeat with the same name to build a list.
+
+|`name[key]=value`
+|Map entry.
+|===
+
+=== Examples
+
+[source,bash]
+----
+uritemplate.sh 'https://example.com/users/{id}' 'id=42'
+# → https://example.com/users/42
+
+uritemplate.sh '{/segments*}' 'segments=a' 'segments=b' 'segments=c'
+# → /a/b/c
+
+uritemplate.sh '{?q,lang}' 'q=hello world' 'lang=en'
+# → ?q=hello%20world&lang=en
+
+uritemplate.sh 'https://example.com{+path}' 'path=/foo/bar'
+# → https://example.com/foo/bar
+----
+
+=== Operator reference
+
+[cols="1,3",options="header"]
+|===
+|Operator |Behaviour
+
+|(none)
+|Comma-separated values; characters percent-encoded.
+
+|`+`
+|Reserved passthrough; comma-separated.
+
+|`#`
+|Fragment prefix (`#`); reserved passthrough.
+
+|`.`
+|Dot-prefixed, dot-separated.
+
+|`/`
+|Slash-prefixed, slash-separated.
+
+|`;`
+|Semicolon-prefixed, named pairs.
+
+|`?`
+|Query string (`?key=value&…`).
+
+|`&`
+|Query continuation (`&key=value&…`).
+|===
+
+Add `*` after a variable name to explode lists and maps into separate
+components.  Add `:N` to truncate a string variable to N characters.
+
+== HAL document navigator — `hal.sh`
+
+Navigate and extract values from
+https://stateless.co/hal_specification.html[HAL] documents in JSON, YAML, or
+XML format.
+
+Requires `yq` (mikefarah/yq v4) for YAML and XML, or `jq` for JSON.
+
+=== Interactive mode
+
+[source,bash]
+----
+hal.sh <file>
+----
+
+Opens a menu-driven navigator.  At each level you can choose links,
+embedded resources, or properties to descend into.  Selecting *print* outputs
+the current node.  Selecting *quit* or *exit* prints the current jpath
+expression to stdout.
+
+=== Non-interactive mode
+
+[source,bash]
+----
+hal.sh <file> links      [rel [N] [field]]
+hal.sh <file> embeddeds  [rel [N] [args...]]
+hal.sh <file> properties [key [args...]]
+----
+
+[cols="1,3",options="header"]
+|===
+|Sub-command |Description
+
+|`links`
+|Extract from `_links`.  Optionally filter by relation name, array index N,
+and a specific link field (e.g. `href`).
+
+|`embeddeds`
+|Extract from `_embedded`.  Optionally filter by relation name and index,
+then traverse further into the nested resource.
+
+|`properties`
+|Extract top-level properties (those outside `_links` and `_embedded`).
+Optionally specify a key and further traversal steps.
+|===
+
+=== Examples
+
+[source,bash]
+----
+# All link relations in a HAL document
+hal.sh response.body links
+
+# href of the first "order" link
+hal.sh response.body links order 0 href
+
+# Second embedded "items" resource
+hal.sh response.body embeddeds items 1
+
+# Value of the "total" property
+hal.sh response.body properties total
+----
+
+== Interactive menu — `menu.sh`
+
+A keyboard-driven single-selection menu for use in scripts or interactively.
+
+=== Usage
+
+[source,bash]
+----
+menu.sh <prompt> <option> <option>...   # all on the command line
+menu.sh <prompt>                        # prompt as arg, options from stdin
+menu.sh                                 # first stdin line = prompt, rest = options
+----
+
+The chosen option text is written to stdout; the menu display goes to stderr.
+Invocations from scripts typically capture stdout:
+
+[source,bash]
+----
+choice=$(menu.sh "Choose an environment:" staging production)
+echo "Selected: $choice"
+----
+
+Selection is a single keypress (`1`–`9`, then `a`–`z`).  When there are more
+than 36 options the menu paginates (30 per page); press `<` / `>` to move
+between pages.
+
+== AsciiDoc integration — `adoc.sh`
+
+Wraps files sharing a base name in AsciiDoc `tag::`/`end::` regions so they
+can be included directly in documentation.  Works naturally with the output
+groups produced by the HTTP client scripts.
+
+=== Usage
+
+[source,bash]
+----
+adoc.sh <base>...
+printf "base1\nbase2\n" | adoc.sh
+----
+
+=== Example
+
+Given the files `jsonplaceholder.typicode.com_1711234567890.curl`,
+`jsonplaceholder.typicode.com_1711234567890.status`, and
+`jsonplaceholder.typicode.com_1711234567890.body`:
+
+[source,bash]
+----
+adoc.sh jsonplaceholder.typicode.com_1711234567890
+----
+
+Output:
+
+[source,asciidoc]
+----
+// tag::jsonplaceholder.typicode.com_1711234567890.curl[]
+curl 'https://jsonplaceholder.typicode.com/posts/1' ...
+// end::jsonplaceholder.typicode.com_1711234567890.curl[]
+// tag::jsonplaceholder.typicode.com_1711234567890.status[]
+200
+// end::jsonplaceholder.typicode.com_1711234567890.status[]
+// tag::jsonplaceholder.typicode.com_1711234567890.body[]
+{"userId":1,"id":1,"title":"...","body":"..."}
+// end::jsonplaceholder.typicode.com_1711234567890.body[]
+----
+
+=== Saving to a file and including regions
+
+Redirect the output to a `.adoc` file alongside your documentation source:
+
+[source,bash]
+----
+adoc.sh jsonplaceholder.typicode.com_1711234567890 >> examples/responses.adoc
+----
+
+Each tagged region can then be pulled into any AsciiDoc document with the
+`include::` directive and a `tag=` attribute whose value is the file name
+(including extension) used as the region label:
+
+[source,asciidoc]
+------
+The following request was captured with HALDiSh:
+
+[source,bash]
+----
+\include::responses.adoc[tag=jsonplaceholder.typicode.com_1711234567890.curl]
+----
+
+The server responded with HTTP `\include::responses.adoc[tag=jsonplaceholder.typicode.com_1711234567890.status]`:
+
+[source,json]
+----
+\include::responses.adoc[tag=jsonplaceholder.typicode.com_1711234567890.body]
+----
+------
+
+Because the tag label is the full file name (base + extension), a single
+`.adoc` file can hold regions from many captured responses and you reference
+only the ones you need.
+
+== File management
+
+=== `rename.sh` — rename a request group
+
+Renames all files that share a base name, preserving their extensions.
+
+[source,bash]
+----
+rename.sh <new-name> <old-name>
+rename.sh <new-name>               # old-name from stdin
+----
+
+[source,bash]
+----
+# Rename the captured response to something meaningful
+base=$(GET 'https://jsonplaceholder.typicode.com/posts/1')
+rename.sh get-post-1 "$base"
+# get-post-1.curl  get-post-1.status  get-post-1.body  …
+----
+
+Pipeable — prints the new base name to stdout:
+
+[source,bash]
+----
+GET 'https://jsonplaceholder.typicode.com/posts/1' | rename.sh get-post-1 | adoc.sh
+----
+
+=== `cleanup.sh` — delete a request group
+
+Deletes all files matching `<base-name>.*`, optionally keeping specific
+extensions.
+
+[source,bash]
+----
+cleanup.sh <base-name> [keep-ext...]
+cleanup.sh -- [keep-ext...]           # base-name from stdin
+----
+
+[source,bash]
+----
+# Delete everything
+cleanup.sh jsonplaceholder.typicode.com_1711234567890
+
+# Keep only status and body
+cleanup.sh jsonplaceholder.typicode.com_1711234567890 status body
+
+# Pipeline: capture, process, then clean up
+base=$(GET 'https://jsonplaceholder.typicode.com/posts')
+hal.sh "${base}.body" properties total
+cleanup.sh "$base"
+----
+
+Prints the base name to stdout for further piping.
+
+== Building from source
+
+Requires Java 21 and the Gradle wrapper included in the repository.
+
+[cols="1,2",options="header"]
+|===
+|Task |Command
+
+|Run unit tests
+|`./gradlew :scripts:test`
+
+|Build the `.run` archive
+|`./gradlew :scripts:assembleDist`
+
+|Syntax-check example scripts
+|`./gradlew :examples:check`
+
+|Full build (tests + archive)
+|`./gradlew build`
+
+|Install bats-core locally
+|`./gradlew :scripts:installBats`
+|===
+
+The archive is produced at `scripts/build/dist/HALDiSh-<version>.run`.
