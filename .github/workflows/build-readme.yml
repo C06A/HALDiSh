@@ -36,10 +36,10 @@ jobs:
           fi
 
           # Rebuild if:
-          # - README-src.asciidoc changed
+          # - README.asciidoc changed
           # - any .asciidoc file changed
           # - the workflow itself changed (so new logic takes effect)
-          if git diff --name-only HEAD^ HEAD | grep -E '^(README-src\.asciidoc|.*\.asciidoc|.*\.adoc|src/tests/scripts/apiGuruSpec.sh|\.github/workflows/build-readme\.yml)$' >/dev/null; then
+          if git diff --name-only HEAD^ HEAD | grep -E '^(README\.asciidoc|.*\.asciidoc|.*\.adoc|src/tests/scripts/apiGuruSpec.sh|\.github/workflows/build-readme\.yml)$' >/dev/null; then
             echo "AsciiDoc source or workflow changed, will rebuild README.md"
             echo "changed=true" >> "$GITHUB_OUTPUT"
           else
@@ -60,30 +60,30 @@ jobs:
           sudo apt-get install -y pandoc
           gem install asciidoctor
 
-      - name: Generate README.md from haldish/README-src.asciidoc
+      - name: Generate README.md from haldish/README.asciidoc
         if: steps.diff.outputs.changed == 'true'
         run: |
           HEADER="<!-- AUTO-GENERATED FILE — DO NOT EDIT.
-          -- Edit haldish/README-src.asciidoc and let CI regenerate this file.
+          -- Edit haldish/README.asciidoc and let CI regenerate this file.
           -->
 
           "
           # Asciidoctor expands includes/tags → DocBook → Pandoc → GitHub-flavored Markdown
-          asciidoctor -b docbook -o - haldish/README-src.asciidoc \
+          asciidoctor -b docbook -o - haldish/README.asciidoc \
             | pandoc -f docbook -t gfm -o haldish/README.md
 
           printf "%s\n%s" "$HEADER" "$(cat haldish/README.md)" > haldish/README.md
 
-      - name: Generate README.md from README-src.asciidoc
+      - name: Generate README.md from README.asciidoc
         if: steps.diff.outputs.changed == 'true'
         run: |
           HEADER="<!-- AUTO-GENERATED FILE — DO NOT EDIT.
-          -- Edit README-src.asciidoc and let CI regenerate this file.
+          -- Edit README.asciidoc and let CI regenerate this file.
           -->
 
           "
           # Asciidoctor expands includes/tags → DocBook → Pandoc → GitHub-flavored Markdown
-          asciidoctor -b docbook -o - README-src.asciidoc \
+          asciidoctor -b docbook -o - README.asciidoc \
             | pandoc -f docbook -t gfm -o README.md
 
           printf "%s\n%s" "$HEADER" "$(cat README.md)" > README.md
