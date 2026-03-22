@@ -1,6 +1,6 @@
 allprojects {
-    group   = "com.haldish"
-    version = "0.1.0"
+    group   = "com.helpchoice.hal"
+    version = "2.0.0"
 }
 
 // Each subproject declares its own lifecycle tasks (clean, build, test, etc.)

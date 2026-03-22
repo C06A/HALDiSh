@@ -89,7 +89,7 @@ tasks.register<Exec>("test") {
  *   3. Prepending a pure-bash self-extraction header.
  *
  * The resulting <name>-<version>.run file can be distributed as-is and
- * executed with:   bash HALDiSh-0.1.0.run [--prefix /install/path]
+ * executed with:   bash HALDiSh-<version>.run [--prefix /install/path]
  */
 tasks.register("assembleDist") {
     group       = "build"
@@ -133,16 +133,22 @@ tasks.register("assembleDist") {
 // ─── publish ──────────────────────────────────────────────────────────────────
 
 /**
- * Publishes the .run archive to Sonatype OSSRH (releases or snapshots).
+ * Stages the .run archive to Maven Local, then uploads a deployment bundle to
+ * the Sonatype Central Portal Publisher API.
+ *
+ * The deployment is created with publishingType=USER_MANAGED so it waits for
+ * manual review and release at https://central.sonatype.com/publishing/deployments
  *
  * Required credentials — supply via ~/.gradle/gradle.properties or env vars:
- *   mavenCentralUsername  / MAVEN_CENTRAL_USERNAME
- *   mavenCentralPassword  / MAVEN_CENTRAL_PASSWORD
- *   mavenCentralNamespace / MAVEN_CENTRAL_NAMESPACE  — Maven groupId (e.g. com.haldish)
+ *   mavenCentralUsername  / MAVEN_CENTRAL_USERNAME  — Central Portal user token
+ *   mavenCentralPassword  / MAVEN_CENTRAL_PASSWORD  — Central Portal password token
+ *   mavenCentralNamespace / MAVEN_CENTRAL_NAMESPACE — Maven groupId (e.g. com.helpchoice.haldish)
  *
  * Required signing keys (in-memory PGP):
  *   signingKeyFile  / SIGNING_KEY_FILE  — path to ASCII-armoured private key file
  *   signingPassword / SIGNING_PASSWORD  — key passphrase
+ *
+ * Snapshots are deployed directly to the Central snapshots repository instead.
  */
 publishing {
     publications {
@@ -188,11 +194,8 @@ publishing {
 
     repositories {
         maven {
-            name = "sonatype"
-            val releasesUrl  = uri("https://s01.oss.sonatype.org/service/local/staging/deploy/maven2/")
-            val snapshotsUrl = uri("https://s01.oss.sonatype.org/content/repositories/snapshots/")
-            url = if (version.toString().endsWith("SNAPSHOT")) snapshotsUrl else releasesUrl
-
+            name = "snapshots"
+            url  = uri("https://central.sonatype.com/repository/maven-snapshots/")
             credentials {
                 username = providers.gradleProperty("mavenCentralUsername")
                     .orElse(providers.environmentVariable("MAVEN_CENTRAL_USERNAME")).orNull
@@ -200,6 +203,68 @@ publishing {
                     .orElse(providers.environmentVariable("MAVEN_CENTRAL_PASSWORD")).orNull
             }
         }
+        mavenLocal()
+    }
+}
+
+/**
+ * Bundles the Maven Local staging directory for this publication into a ZIP
+ * file and uploads it to the Sonatype Central Portal Publisher API.
+ *
+ * The deployment is USER_MANAGED: it appears at
+ *   https://central.sonatype.com/publishing/deployments
+ * and must be released manually from there.
+ *
+ * Run:  ./gradlew :scripts:publishToMavenCentral
+ */
+tasks.register("publishToMavenCentral") {
+    group       = "publishing"
+    description = "Uploads a deployment bundle to the Sonatype Central Portal (USER_MANAGED release)."
+
+    dependsOn(
+        tasks.named("publishRunArchivePublicationToMavenLocalRepository"),
+        tasks.named("signRunArchivePublication"),
+    )
+
+    doLast {
+        val groupId    = publishing.publications.getByName<MavenPublication>("runArchive").groupId
+        val artifactId = publishing.publications.getByName<MavenPublication>("runArchive").artifactId
+        val ver        = version.toString()
+
+        val groupPath   = groupId.replace('.', '/')
+        val localRepo   = file("${System.getProperty("user.home")}/.m2/repository")
+        val stagingDir  = localRepo.resolve("$groupPath/$artifactId/$ver")
+        val bundleZip   = buildBase.resolve("central-bundle.zip")
+
+        if (!stagingDir.exists()) {
+            throw GradleException("Staging directory not found: $stagingDir\nRun publishRunArchivePublicationToMavenLocal first.")
+        }
+
+        // Build the ZIP bundle with full Maven repository path preserved.
+        // Central Portal requires: com/helpchoice/haldish/2.0.0/haldish-2.0.0.run etc.
+        bundleZip.delete()
+        project.exec {
+            workingDir(localRepo)
+            commandLine("bash", "-c", "zip -r '${bundleZip}' '$groupPath/$artifactId/$ver/'")
+        }
+
+        val username = providers.gradleProperty("mavenCentralUsername")
+            .orElse(providers.environmentVariable("MAVEN_CENTRAL_USERNAME")).orNull
+            ?: throw GradleException("mavenCentralUsername / MAVEN_CENTRAL_USERNAME is not set.")
+        val password = providers.gradleProperty("mavenCentralPassword")
+            .orElse(providers.environmentVariable("MAVEN_CENTRAL_PASSWORD")).orNull
+            ?: throw GradleException("mavenCentralPassword / MAVEN_CENTRAL_PASSWORD is not set.")
+
+        println("Uploading ${bundleZip.name} to Sonatype Central Portal…")
+        project.exec {
+            commandLine(
+                "curl", "--fail", "--silent", "--show-error",
+                "-u", "$username:$password",
+                "-F", "bundle=@${bundleZip}",
+                "https://central.sonatype.com/api/v1/publisher/upload?publishingType=USER_MANAGED"
+            )
+        }
+        println("Upload complete. Review and release at https://central.sonatype.com/publishing/deployments")
     }
 }
 
