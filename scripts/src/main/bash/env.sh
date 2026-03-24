@@ -11,7 +11,7 @@
 # =============================================================================
 
 # ── guard: must be sourced ────────────────────────────────────────────────────
-if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+if [[ "${BASH_SOURCE[0]:-}" == "${0}" ]]; then
     printf 'env.sh: must be sourced, not executed directly.\n' >&2
     printf '  source %s\n' "${BASH_SOURCE[0]}" >&2
     exit 1
@@ -19,7 +19,7 @@ fi
 
 # Resolve the directory containing this file, regardless of where it is sourced
 # from or how the containing script was invoked.
-_hal_env_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_hal_env_dir="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 
 # ── integrity check (runs as subprocess so it can use exit freely) ────────────
 if ! bash "${_hal_env_dir}/validate.sh"; then
