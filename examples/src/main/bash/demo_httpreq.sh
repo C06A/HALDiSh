@@ -77,7 +77,6 @@ hal::log::info "JSONPlaceholder demo — output files accumulate in: ${_demo_out
 printf '\n'
 
 while true; do
-
     choice=$(menu.sh "Choose a request to make" \
         "GET  /posts?_limit=5            list 5 posts" \
         "GET  /posts/1                   fetch post #1" \
@@ -88,66 +87,34 @@ while true; do
         "GET  /posts/1 + custom header   add X-Client header" \
         "Inspect last .curl file" \
         "Exit")
-
     echo
 
     [[ "$choice" == "Exit" ]] && break
 
+    # Extract HTTP method (word 1) and path (word 2) from the menu label.
+    read -r _method _path _ <<< "$choice"
+    _extra_args=()
+    _saved_headers="$HTTP_IN_HEADERS"
+
     case "$choice" in
-
-        "GET  /posts?_limit=5            list 5 posts")
-            hal::log::info "GET ${_BASE}/posts?_limit=5"
-            base=$(_req GET "${_BASE}/posts?_limit=5")
-            _show "$base"
-            ;;
-
-        "GET  /posts/1                   fetch post #1")
-            hal::log::info "GET ${_BASE}/posts/1"
-            base=$(_req GET "${_BASE}/posts/1")
-            _show "$base"
-            ;;
-
-        "GET  /comments?postId=1         comments on post #1")
-            hal::log::info "GET ${_BASE}/comments?postId=1"
-            base=$(_req GET "${_BASE}/comments?postId=1")
-            _show "$base"
-            ;;
-
-        "POST /posts                     create a post (-u body flags)")
-            hal::log::info "POST ${_BASE}/posts  (body via -u URL-encoded fields)"
-            base=$(_req POST "${_BASE}/posts" \
+        "POST /posts"*)
+            _extra_args=( \
                 -u 'title=Hello from HALDiSh' \
                 -u 'body=Created via httpreq.sh' \
-                -u 'userId=42')
-            _show "$base"
+                -u 'userId=42' \
+            )
             ;;
-
-        "PUT  /posts/1                   replace post #1")
-            hal::log::info "PUT ${_BASE}/posts/1"
-            base=$(_req PUT "${_BASE}/posts/1" \
+        "PUT  /posts/1"*)
+            _extra_args=( \
                 -u 'id=1' \
                 -u 'title=Updated by HALDiSh' \
                 -u 'body=This post was replaced via httpreq.sh' \
-                -u 'userId=1')
-            _show "$base"
+                -u 'userId=1' \
+            )
             ;;
-
-        "DELETE /posts/1                 delete post #1")
-            hal::log::info "DELETE ${_BASE}/posts/1"
-            base=$(_req DELETE "${_BASE}/posts/1")
-            _show "$base"
+        "GET  /posts/1 + custom header"*)
+            HTTP_IN_HEADERS=$'Accept: application/json\nX-Client: HALDiSh'
             ;;
-
-        "GET  /posts/1 + custom header   add X-Client header")
-            hal::log::info "GET ${_BASE}/posts/1  (with X-Client: HALDiSh)"
-            HTTP_IN_HEADERS=$'Accept: application/json\nX-Client: HALDiSh' \
-                base=$(_req GET "${_BASE}/posts/1")
-            _show "$base"
-            hal::log::info "Request headers sent:"
-            grep 'X-Client\|Accept' "${_demo_out}/${base}.curl" || true
-            printf '\n'
-            ;;
-
         "Inspect last .curl file")
             last=$(ls -t "${_demo_out}"/*.curl 2>/dev/null | head -1 || true)
             if [[ -z "$last" ]]; then
@@ -158,8 +125,20 @@ while true; do
                 _show_curl "$base"
             fi
             ;;
-
     esac
+
+    if [[ "$choice" != "Inspect last .curl file" ]]; then
+        hal::log::info "${_method} ${_BASE}${_path}"
+        base=$(_req "$_method" "${_BASE}${_path}" ${_extra_args[@]+"${_extra_args[@]}"})
+        _show "$base"
+    fi
+
+    if [[ "$choice" == "GET  /posts/1 + custom header"* ]]; then
+        hal::log::info "Request headers sent:"
+        grep 'X-Client\|Accept' "${_demo_out}/${base}.curl" || true
+        printf '\n'
+        HTTP_IN_HEADERS="$_saved_headers"
+    fi
 
     IFS= read -r -s -n1 -p "  Press any key to continue..." < /dev/tty
     echo
