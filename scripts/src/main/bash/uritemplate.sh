@@ -7,6 +7,7 @@
 #
 # Variable binding syntax:
 #   name=value        → string variable; repeat the flag to build a list
+#   name[]=value      → list append (preferred for lists)
 #   name[field]=value → map entry
 #
 # Prints the expanded URI to stdout.
@@ -132,12 +133,22 @@ _hal_uri_parse_bindings() {
         value="${binding#*=}"
 
         if [[ "$key" == *'['*']' ]]; then
-            # Map entry: key[field]=value
+            # Map entry or list-append: key[field]=value or key[]=value
             base="${key%%\[*}"
             field="${key#*\[}"
             field="${field%]}"
-            _HAL_URI_VARS["${base}[${field}]"]="$value"
-            _HAL_URI_TYPES["$base"]='map'
+
+            if [[ -z "$field" ]]; then
+                # key[]=value → list append
+                idx="${_HAL_URI_LIST_CNT[$base]:-0}"
+                _HAL_URI_VARS["${base}[${idx}]"]="$value"
+                _HAL_URI_LIST_CNT["$base"]=$(( idx + 1 ))
+                _HAL_URI_TYPES["$base"]='list'
+            else
+                # key[field]=value → map entry
+                _HAL_URI_VARS["${base}[${field}]"]="$value"
+                _HAL_URI_TYPES["$base"]='map'
+            fi
 
         else
             # Plain name: first occurrence → string; repeated → list

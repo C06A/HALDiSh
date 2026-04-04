@@ -148,19 +148,63 @@ if [[ -t 2 ]]; then
     _HAL_YEL='\033[0;33m'
     _HAL_GRN='\033[0;32m'
     _HAL_CYN='\033[0;36m'
+    _HAL_MAG='\033[0;35m'
+    _HAL_DIM='\033[2m'
     _HAL_RST='\033[0m'
 else
-    _HAL_RED='' _HAL_YEL='' _HAL_GRN='' _HAL_CYN='' _HAL_RST=''
+    _HAL_RED='' _HAL_YEL='' _HAL_GRN='' _HAL_CYN='' _HAL_MAG='' _HAL_DIM='' _HAL_RST=''
 fi
 
-hal::log::info()  { printf "${_HAL_CYN}[INFO]${_HAL_RST}  %s\n" "$*" >&2; }
-hal::log::ok()    { printf "${_HAL_GRN}[ OK ]${_HAL_RST}  %s\n" "$*" >&2; }
-hal::log::warn()  { printf "${_HAL_YEL}[WARN]${_HAL_RST}  %s\n" "$*" >&2; }
-hal::log::error() { printf "${_HAL_RED}[ERR ]${_HAL_RST}  %s\n" "$*" >&2; }
+# Numeric level thresholds (higher number = more verbose)
+_HAL_LVL_OFF=0
+_HAL_LVL_ERROR=1
+_HAL_LVL_WARN=2
+_HAL_LVL_INFO=3
+_HAL_LVL_DEBUG=4
+_HAL_LVL_TRACE=5
+
+# hal::log::init
+# (Re-)reads HAL_LOG_LEVEL and caches it as a number in _HAL_LOG_LEVEL.
+# Called automatically at source time; call again after changing HAL_LOG_LEVEL.
+#
+# HAL_LOG_LEVEL accepts a name or number (case-insensitive):
+#   off   | 0   — silence all output
+#   error | 1   — errors only
+#   warn  | 2   — warn and error
+#   info  | 3   — info, ok, warn, error          (default)
+#   debug | 4   — debug and above
+#   trace | 5   — everything
+hal::log::init() {
+    local _level="${HAL_LOG_LEVEL:-info}"
+    case "${_level,,}" in
+        0|off)    _HAL_LOG_LEVEL=$_HAL_LVL_OFF   ;;
+        1|err*)   _HAL_LOG_LEVEL=$_HAL_LVL_ERROR ;;
+        2|warn*)  _HAL_LOG_LEVEL=$_HAL_LVL_WARN  ;;
+        3|info)   _HAL_LOG_LEVEL=$_HAL_LVL_INFO  ;;
+        4|debug)  _HAL_LOG_LEVEL=$_HAL_LVL_DEBUG ;;
+        5|trace)  _HAL_LOG_LEVEL=$_HAL_LVL_TRACE ;;
+        *)        _HAL_LOG_LEVEL=$_HAL_LVL_INFO  ;;
+    esac
+}
+hal::log::init
+
+hal::log::trace() { (( _HAL_LOG_LEVEL >= _HAL_LVL_TRACE )) || return 0
+                    printf "${_HAL_DIM}[TRC ]${_HAL_RST}  %s\n" "$*" >&2; }
+hal::log::debug() { (( _HAL_LOG_LEVEL >= _HAL_LVL_DEBUG )) || return 0
+                    printf "${_HAL_MAG}[DBG ]${_HAL_RST}  %s\n" "$*" >&2; }
+hal::log::info()  { (( _HAL_LOG_LEVEL >= _HAL_LVL_INFO  )) || return 0
+                    printf "${_HAL_CYN}[INFO]${_HAL_RST}  %s\n" "$*" >&2; }
+hal::log::ok()    { (( _HAL_LOG_LEVEL >= _HAL_LVL_INFO  )) || return 0
+                    printf "${_HAL_GRN}[ OK ]${_HAL_RST}  %s\n" "$*" >&2; }
+hal::log::warn()  { (( _HAL_LOG_LEVEL >= _HAL_LVL_WARN  )) || return 0
+                    printf "${_HAL_YEL}[WARN]${_HAL_RST}  %s\n" "$*" >&2; }
+hal::log::error() { (( _HAL_LOG_LEVEL >= _HAL_LVL_ERROR )) || return 0
+                    printf "${_HAL_RED}[ERR ]${_HAL_RST}  %s\n" "$*" >&2; }
 
 # hal::log::die <message> [exit_code]
 # Logs an error and exits.  Default exit code is 1.
+# Always prints regardless of HAL_LOG_LEVEL.
 hal::log::die() {
-    hal::log::error "$1"
+    printf "${_HAL_RED}[ERR ]${_HAL_RST}  %s\n" "$1" >&2
     exit "${2:-1}"
 }

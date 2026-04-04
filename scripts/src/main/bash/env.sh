@@ -37,4 +37,5 @@ case ":${PATH}:" in
     *) export PATH="${_hal_env_dir}:${PATH}" ;;
 esac
 
+export HAL_LIB_DIR="${_hal_env_dir}"
 unset _hal_env_dir
