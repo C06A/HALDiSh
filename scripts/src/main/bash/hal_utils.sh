@@ -175,7 +175,7 @@ _HAL_LVL_TRACE=5
 #   debug | 4   — debug and above
 #   trace | 5   — everything
 hal::log::init() {
-    local _level="${HAL_LOG_LEVEL:-info}"
+    local _level="${1:-${HAL_LOG_LEVEL:-info}}"
     case "${_level,,}" in
         0|off)    _HAL_LOG_LEVEL=$_HAL_LVL_OFF   ;;
         1|err*)   _HAL_LOG_LEVEL=$_HAL_LVL_ERROR ;;

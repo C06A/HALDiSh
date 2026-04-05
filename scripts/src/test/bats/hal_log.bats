@@ -335,3 +335,23 @@ setup() {
     run hal::log::info "should be visible"
     [ -n "$output" ]
 }
+
+@test "hal::log::init accepts level as argument" {
+    hal::log::init error
+    run hal::log::info "should be hidden"
+    [ -z "$output" ]
+    run hal::log::error "should be visible"
+    [ -n "$output" ]
+}
+
+@test "hal::log::init argument takes precedence over HAL_LOG_LEVEL" {
+    HAL_LOG_LEVEL=trace; hal::log::init error
+    run hal::log::debug "should be hidden"
+    [ -z "$output" ]
+}
+
+@test "hal::log::init falls back to HAL_LOG_LEVEL when no argument given" {
+    HAL_LOG_LEVEL=error; hal::log::init
+    run hal::log::warn "should be hidden"
+    [ -z "$output" ]
+}
