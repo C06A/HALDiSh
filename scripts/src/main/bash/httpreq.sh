@@ -263,7 +263,8 @@ _hal_http_write_curl_file() {
                     # Value too long: place it on the next line, indented further
                     printf ' \\\n    %s \\\n        %s' "$token" "$val" >> "$out"
                 else
-                    printf ' \\\n    %s' "$line" >> "$out"
+                    # $line already carries the 4-space indent; no extra spaces needed
+                    printf ' \\\n%s' "$line" >> "$out"
                 fi
                 i=$((i + 2))
                 ;;

@@ -314,6 +314,62 @@ MOCK
     ! grep -q '\-\-silent' "${WORK_DIR}/${output}.curl"
 }
 
+# ── .curl file multi-line format ──────────────────────────────────────────────
+
+@test "httpreq: .curl file spans multiple lines (at least 3 for a simple GET)" {
+    _run_req GET 'https://example.com/'
+    [ "$status" -eq 0 ]
+    local curl_file="${WORK_DIR}/${output}.curl"
+    local line_count
+    line_count=$(wc -l < "$curl_file")
+    [ "$line_count" -ge 3 ]
+}
+
+@test "httpreq: .curl file first line is 'curl \\'" {
+    _run_req GET 'https://example.com/'
+    [ "$status" -eq 0 ]
+    local first_line
+    first_line=$(head -1 "${WORK_DIR}/${output}.curl")
+    [ "$first_line" = 'curl \' ]
+}
+
+@test "httpreq: .curl file continuation lines are indented with exactly 4 spaces" {
+    _run_req GET 'https://example.com/'
+    [ "$status" -eq 0 ]
+    local curl_file="${WORK_DIR}/${output}.curl"
+    # Every line after the first must start with 4 spaces (flag/value or URL lines).
+    # grep -v returns 1 when no lines match (all pass), so use || true to avoid
+    # a false failure under set -euo pipefail.
+    local bad
+    bad=$(tail -n +2 "$curl_file" | grep -v '^    ' || true)
+    [ -z "$bad" ]
+}
+
+@test "httpreq: .curl file flag+value pair appears on same indented line" {
+    _run_req GET 'https://example.com/'
+    [ "$status" -eq 0 ]
+    # -X and GET must appear together on one continuation line
+    grep -qE '^    -X GET( \\)?$' "${WORK_DIR}/${output}.curl"
+}
+
+@test "httpreq: .curl file URL appears on its own continuation line" {
+    _run_req GET 'https://example.com/'
+    [ "$status" -eq 0 ]
+    grep -qF '    https://example.com/' "${WORK_DIR}/${output}.curl"
+    # URL line must be on its own (not combined with a flag)
+    ! grep -qE '^\s+-[A-Za-z].*https://' "${WORK_DIR}/${output}.curl"
+}
+
+@test "httpreq: .curl file with --header spans across multiple lines" {
+    HTTP_IN_HEADERS='Authorization: Bearer token123' \
+        _run_req GET 'https://example.com/'
+    [ "$status" -eq 0 ]
+    local line_count
+    line_count=$(wc -l < "${WORK_DIR}/${output}.curl")
+    [ "$line_count" -ge 4 ]
+    grep -qE '^    --header ' "${WORK_DIR}/${output}.curl"
+}
+
 # ── HTTP_IN_HEADERS env var ───────────────────────────────────────────────────
 
 @test "httpreq: HTTP_IN_HEADERS single header becomes --header curl arg" {
