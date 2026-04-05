@@ -24,14 +24,15 @@ curl -LO https://github.com/C06A/HALDiSh/releases/latest/download/HALDiSh-<versi
 
 === From Maven Central
 
-The archive is also published to Maven Central under the project's group ID.
-You can download it directly with Maven or Gradle, or retrieve it manually:
+The archive is also published to Maven Central.
+You can download it manually with curl:
 
 [source,bash]
 ----
-# With curl via the Central repository search API
 curl -LO "https://repo1.maven.org/maven2/com/helpchoice/haldish/<version>/haldish-<version>.run"
 ----
+
+Or resolve it through a Gradle or Maven build (see <<_using_haldish_as_a_dependency>>).
 
 == Installation
 
@@ -56,6 +57,7 @@ The installer:
 2. Checks that Bash 4 or later is available.
 3. Creates the HTTP method entry-points (`GET`, `POST`, `PUT`, `PATCH`,
    `OPTIONS`, `DELETE`).
+4. Generates an integrity manifest used to detect post-install modifications.
 
 == Activation
 
@@ -73,6 +75,12 @@ After sourcing:
 * All `hal::*` functions are available in the current shell.
 * The library directory is prepended to `PATH`, so scripts such as `menu.sh`,
   `hal.sh`, and the HTTP method entry-points can be invoked by name.
+* The `HAL_LIB_DIR` environment variable is exported and points to the
+  installation directory.  Scripts that need to locate the library at runtime
+  can read this variable.
+
+If validation fails (e.g. a file has been modified since installation),
+`env.sh` returns 1 without loading anything.
 
 == Library functions — `hal_utils.sh`
 
@@ -163,25 +171,115 @@ follow the `hal::<namespace>::<name>` naming convention.
 All logging functions write to stderr.  Color output is disabled
 automatically when stderr is not connected to a terminal.
 
-[cols="1,2",options="header"]
+Output can be filtered by level via the `HAL_LOG_LEVEL` environment variable.
+The default level is `info`, which shows `info`, `ok`, `warn`, and `error`
+messages while suppressing `debug` and `trace`.
+
+[cols="1,1,2",options="header"]
 |===
-|Function |Description
+|Function |Level |Description
+
+|`hal::log::trace <message>`
+|`trace` (5)
+|Print a dim `[TRC ]` line.  Most verbose; useful for step-by-step tracing.
+
+|`hal::log::debug <message>`
+|`debug` (4)
+|Print a magenta `[DBG ]` line.
 
 |`hal::log::info <message>`
+.2+|`info` (3)
 |Print a cyan `[INFO]` line.
 
 |`hal::log::ok <message>`
-|Print a green `[ OK ]` line.
+|Print a green `[ OK ]` line.  Shares the `info` threshold — both are shown
+or suppressed together.
 
 |`hal::log::warn <message>`
+|`warn` (2)
 |Print a yellow `[WARN]` line.
 
 |`hal::log::error <message>`
+|`error` (1)
 |Print a red `[ERR ]` line.
 
-|`hal::log::die [exit-code] <message>`
-|Print an error and exit.  Default exit code is 1.
+|`hal::log::die <message> [exit-code]`
+|always
+|Print an error and exit.  Default exit code is 1.  Always prints regardless
+of `HAL_LOG_LEVEL`.
 |===
+
+==== Controlling the log level
+
+Pass the desired level as an argument to `hal::log::init`, or set
+`HAL_LOG_LEVEL` and call `hal::log::init` with no argument — the function
+falls back to the environment variable when none is supplied.  All messages at
+or above the configured level are printed.  Level names are case-insensitive.
+
+[cols="1,1,3",options="header"]
+|===
+|Value |Numeric |Messages shown
+
+|`off`
+.2+|0
+.2+|None (complete silence)
+
+|`0`
+
+|`error`
+.3+|1
+.3+|`error`, `die`
+
+|`err`
+
+|`1`
+
+|`warn`
+.3+|2
+.3+|`warn`, `error`, `die`
+
+|`warning`
+
+|`2`
+
+|`info` _(default)_
+.3+|3
+.3+|`info`, `ok`, `warn`, `error`, `die`
+
+| `ok`
+
+|`3`
+
+|`debug`
+.2+|4
+.2+|`debug`, `info`, `ok`, `warn`, `error`, `die`
+
+|`4`
+
+|`trace`
+.2+|5
+.2+|All messages
+
+|`5`
+
+|===
+
+[source,bash]
+----
+# Pass level as an argument
+hal::log::init warn
+hal::log::debug "not printed"
+hal::log::warn  "printed"
+
+# Or rely on the environment variable
+export HAL_LOG_LEVEL=warn
+source ~/.local/lib/haldish/env.sh
+
+# Change level mid-script — argument takes precedence over HAL_LOG_LEVEL
+HAL_LOG_LEVEL=warn
+hal::log::init debug
+hal::log::debug "Starting verbose section"   # printed (debug overrides warn)
+----
 
 == HTTP client
 
@@ -312,6 +410,9 @@ Variable bindings use the following syntax:
 |`name=value`
 |String variable.  Repeat with the same name to build a list.
 
+|`name[]=value`
+|List append.  Preferred syntax when providing list values directly.
+
 |`name[key]=value`
 |Map entry.
 |===
@@ -323,8 +424,13 @@ Variable bindings use the following syntax:
 uritemplate.sh 'https://example.com/users/{id}' 'id=42'
 # → https://example.com/users/42
 
+# List via repeated plain key
 uritemplate.sh '{/segments*}' 'segments=a' 'segments=b' 'segments=c'
 # → /a/b/c
+
+# List via [] append syntax
+uritemplate.sh '{?tags*}' 'tags[]=red' 'tags[]=green' 'tags[]=blue'
+# → ?tags=red&tags=green&tags=blue
 
 uritemplate.sh '{?q,lang}' 'q=hello world' 'lang=en'
 # → ?q=hello%20world&lang=en
@@ -584,6 +690,283 @@ cleanup.sh "$base"
 
 Prints the base name to stdout for further piping.
 
+== Examples module
+
+The repository contains a runnable examples module under `examples/`.  It
+demonstrates every major feature of the library against real public APIs and
+requires no configuration beyond having the archive installed.
+
+=== Running the examples
+
+From the repository root, launch the interactive demonstrator:
+
+[source,bash]
+----
+bash examples/src/main/bash/demonstrator.sh
+----
+
+The demonstrator automatically installs the HALDiSh archive into
+`examples/build/haldish/` the first time it runs (via
+`./gradlew :examples:installHaldish`), then presents a menu of available
+example scripts.  After each example finishes, control returns to the menu so
+you can try another without restarting.
+
+You can also run any example directly if the archive is already installed and
+`HAL_LIB_DIR` is set:
+
+[source,bash]
+----
+source ~/.local/lib/haldish/env.sh
+bash examples/src/main/bash/demo_httpreq.sh
+----
+
+=== Available examples
+
+[cols="1,3",options="header"]
+|===
+|Script |What it demonstrates
+
+|`demo_strings.sh`
+|`hal::str::*` functions: trim, case conversion, contains, starts_with,
+ends_with, repeat, length.
+
+|`demo_arrays.sh`
+|`hal::arr::*` functions: contains, join.
+
+|`demo_filesystem.sh`
+|`hal::fs::*` functions: existence checks, extension extraction, path
+manipulation.
+
+|`demo_menu.sh`
+|All three invocation styles of `menu.sh` (arguments, piped options, full
+stdin) and how to branch on the selected value.
+
+|`demo_httpreq.sh`
+|HTTP client against https://jsonplaceholder.typicode.com[JSONPlaceholder]:
+GET, POST, PUT, DELETE, custom headers, response file inspection, and curl
+replay commands.
+
+|`demo_periodic_table.sh`
+|Combined `menu.sh` and HTTP client demo: browse a public periodic-table API
+interactively.
+|===
+
+=== Syntax-checking examples
+
+The `examples` module Gradle task `check` runs `bash -n` on every example
+script to verify they parse correctly:
+
+[source,bash]
+----
+./gradlew :examples:check
+----
+
+== Using HALDiSh as a dependency
+
+=== Gradle
+
+Add a dedicated configuration for the `.run` artifact and register an install
+task.  The installed library is then available to any shell task that sources
+`env.sh`.
+
+[source,kotlin]
+----
+// build.gradle.kts
+
+repositories {
+    mavenCentral()
+}
+
+val haldish: Configuration by configurations.creating
+
+dependencies {
+    haldish("com.helpchoice.haldish:haldish:<version>@run")
+}
+
+val installHaldish by tasks.registering {
+    inputs.files(haldish)
+    val installDir = layout.buildDirectory.dir("haldish")
+    outputs.dir(installDir)
+
+    doLast {
+        val dir = installDir.get().asFile
+        dir.mkdirs()
+        exec {
+            commandLine("bash", haldish.singleFile.absolutePath,
+                        "--prefix", dir.absolutePath)
+        }
+    }
+}
+----
+
+After the task runs, the library is at `build/haldish/`.  Activate it from
+your shell scripts or Gradle `commandLine` blocks:
+
+[source,bash]
+----
+source build/haldish/env.sh
+GET 'https://api.example.com/resource'
+----
+
+=== Maven
+
+Maven cannot execute a `.run` file automatically, but you can download the
+artifact and install it as a build step.  Declare the dependency with type
+`run` and use the `maven-dependency-plugin` to copy it, then invoke the
+installer with the `exec-maven-plugin`:
+
+[source,xml]
+----
+<dependencies>
+  <dependency>
+    <groupId>com.helpchoice.haldish</groupId>
+    <artifactId>haldish</artifactId>
+    <version>${haldish.version}</version>
+    <type>run</type>
+  </dependency>
+</dependencies>
+
+<build>
+  <plugins>
+    <plugin>
+      <groupId>org.apache.maven.plugins</groupId>
+      <artifactId>maven-dependency-plugin</artifactId>
+      <executions>
+        <execution>
+          <id>copy-haldish</id>
+          <phase>generate-resources</phase>
+          <goals><goal>copy-dependencies</goal></goals>
+          <configuration>
+            <includeGroupIds>com.helpchoice.haldish</includeGroupIds>
+            <outputDirectory>
+              ${project.build.directory}/haldish-archive
+            </outputDirectory>
+          </configuration>
+        </execution>
+      </executions>
+    </plugin>
+    <plugin>
+      <groupId>org.codehaus.mojo</groupId>
+      <artifactId>exec-maven-plugin</artifactId>
+      <executions>
+        <execution>
+          <id>install-haldish</id>
+          <phase>generate-resources</phase>
+          <goals><goal>exec</goal></goals>
+          <configuration>
+            <executable>bash</executable>
+            <arguments>
+              <argument>
+                ${project.build.directory}/haldish-archive/haldish-${haldish.version}.run
+              </argument>
+              <argument>--prefix</argument>
+              <argument>${project.build.directory}/haldish</argument>
+            </arguments>
+          </configuration>
+        </execution>
+      </executions>
+    </plugin>
+  </plugins>
+</build>
+----
+
+=== Direct download
+
+If you prefer not to use a dependency manager, download the archive manually
+and install it at a known location:
+
+[source,bash]
+----
+curl -LO "https://repo1.maven.org/maven2/com/helpchoice/haldish/<version>/haldish-<version>.run"
+bash haldish-<version>.run --prefix ~/mylibs/haldish
+source ~/mylibs/haldish/env.sh
+----
+
+== Unit tests
+
+The `scripts` module ships with a comprehensive BATS test suite that covers
+all public functions and scripts.
+
+=== Test framework
+
+Tests use https://github.com/bats-core/bats-core[bats-core] 1.10.0, which is
+downloaded automatically into `scripts/build/bats/` the first time the test
+task runs.  No global installation is required.
+
+=== Running the tests
+
+[source,bash]
+----
+# Run the full test suite (downloads bats-core if needed)
+./gradlew :scripts:test
+
+# Install bats-core without running tests
+./gradlew :scripts:installBats
+
+# Run a single test file manually (requires bats on PATH)
+bats scripts/src/test/bats/hal_str.bats
+----
+
+Test results are written in TAP format to `scripts/build/test-results/`.
+
+=== Test coverage
+
+[cols="1,3",options="header"]
+|===
+|Test file |Coverage
+
+|`hal_str.bats`
+|`hal::str::*` — trim, upper, lower, length, contains, starts_with, ends_with,
+repeat.
+
+|`hal_arr.bats`
+|`hal::arr::*` — contains, join.
+
+|`hal_fs.bats`
+|`hal::fs::*` — exists, is_file, is_dir, mkdir_p, extension, basename_no_ext.
+
+|`hal_log.bats`
+|`hal::log::*` — all levels (trace through error, die), level filtering via
+`HAL_LOG_LEVEL` (numeric and named values, case-insensitive, unknown defaults
+to info), `hal::log::init` dynamic re-read.
+
+|`httpreq.bats`
+|HTTP client — method derivation, URL from arg/stdin, request headers and
+cookies, all body flags, output file creation and content.
+
+|`uritemplate.bats`
+|RFC 6570 — all operators, prefix and explode modifiers, string/list/map
+variable types, percent-encoding, stdin template mode.
+
+|`menu.bats`
+|`menu.sh` — all invocation modes, selection keys, pagination, invalid input
+retry, TTY simulation.
+
+|`hal.bats`
+|`hal.sh` — format detection, non-interactive link/embedded/property
+extraction, interactive navigation.
+
+|`adoc.bats`
+|`adoc.sh` — file grouping, AsciiDoc region wrapping, stdin mode.
+
+|`rename.bats`
+|`rename.sh` — base name handling, extension preservation, stdin mode.
+
+|`cleanup.bats`
+|`cleanup.sh` — deletion with and without keep-extension list, stdin mode.
+
+|`env.bats`
+|`env.sh` — sourcing guard, PATH setup, `HAL_LIB_DIR` export, integrity
+validation, duplicate-PATH prevention.
+
+|`setup.bats`
+|`setup.sh` — Bash version check, file verification, method hardlink creation,
+manifest generation.
+
+|`validate.bats`
+|`validate.sh` — manifest presence, SHA-256 verification, method link checks.
+|===
+
 == Building from source
 
 Requires Java 21 and the Gradle wrapper included in the repository.
@@ -606,6 +989,9 @@ Requires Java 21 and the Gradle wrapper included in the repository.
 
 |Install bats-core locally
 |`./gradlew :scripts:installBats`
+
+|Install HALDiSh for examples
+|`./gradlew :examples:installHaldish`
 |===
 
 The archive is produced at `scripts/build/dist/HALDiSh-<version>.run`.
