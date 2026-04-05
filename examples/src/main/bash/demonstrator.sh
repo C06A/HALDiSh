@@ -1,4 +1,4 @@
-7#!/usr/bin/env bash
+#!/usr/bin/env bash
 # =============================================================================
 # demonstrator.sh — HALDiSh example launcher
 #
