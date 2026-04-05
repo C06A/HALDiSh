@@ -511,6 +511,80 @@ cleanup.sh "$base"
 
 Prints the base name to stdout for further piping.
 
+## `prettyprint.sh` — detect type and pretty-print a body file
+
+Inspects the content of `<base>.body` (or a custom source extension),
+identifies the format, and copies or moves the file to `<base>.<ext>`
+with the appropriate extension. JSON, YAML, and XML content is
+reformatted to human-readable pretty-print form; other text encodings
+are converted to UTF-8.
+
+``` bash
+prettyprint.sh [options] [base_name...]
+printf 'base1\nbase2\n' | prettyprint.sh [options]
+```
+
+Options are *positional* — each one takes effect for all base names that
+follow it on the command line:
+
+| Option     | Effect                                                                                                                                                       |
+|------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `-c`       | Copy mode: keep the source file after conversion. This is the default.                                                                                       |
+| `-m`       | Move mode: remove the source file after the converted file is written.                                                                                       |
+| `-e <ext>` | Use `.<ext>` as the source extension instead of `.body` for all following base names. The leading dot is optional (`-e json` and `-e .json` are equivalent). |
+
+When no base names appear on the command line, options are still
+accepted and base names are read from stdin. The mode and extension
+values in effect at the end of the command-line parse apply to all
+stdin-supplied names.
+
+### Detected formats
+
+| Category                         | Extensions assigned                       |
+|----------------------------------|-------------------------------------------|
+| Structured text (pretty-printed) | `json`, `yaml`, `xml`, `html`             |
+| Other text                       | `csv`, `txt`, `svg`                       |
+| Images                           | `jpg`, `png`, `gif`, `webp`, `bmp`, `tif` |
+| Office (OOXML)                   | `docx`, `xlsx`, `pptx`                    |
+| Office (legacy)                  | `doc`, `xls`, `ppt`                       |
+| Office (ODF)                     | `odt`, `ods`, `odp`                       |
+| Documents / e-books              | `pdf`, `epub`                             |
+| Archives                         | `zip`, `gz`, `bz2`, `xz`, `tar`           |
+| Unknown binary                   | `bin`                                     |
+
+Pretty-print tools are selected automatically (first available wins):
+
+| Format     | Tools tried in order                          |
+|------------|-----------------------------------------------|
+| JSON       | `jq`, `python3 -m json.tool`                  |
+| XML / HTML | `xmllint --format`, `python3 xml.dom.minidom` |
+| YAML       | `yq`, `python3 yaml` (PyYAML)                 |
+
+When no formatter is available the file is still copied/moved as-is with
+a warning.
+
+### Examples
+
+``` bash
+# Copy .body to the detected extension and pretty-print
+base=$(GET 'https://api.example.com/orders/1')
+prettyprint.sh "$base"
+# → orders.json (or .xml, .html, … depending on the response)
+
+# Move mode: remove .body after conversion
+prettyprint.sh -m "$base"
+
+# Mixed: copy first response, move subsequent ones
+prettyprint.sh "$base1" -m "$base2" "$base3"
+
+# Source is already named .json (returned by another tool)
+prettyprint.sh -e json "$base"
+
+# Pipeline: fetch → pretty-print → navigate
+base=$(GET 'https://api.example.com/items')
+prettyprint.sh -m "$base" | xargs -I{} hal.sh {}.json properties total
+```
+
 # Examples module
 
 The repository contains a runnable examples module under `examples/`. It
