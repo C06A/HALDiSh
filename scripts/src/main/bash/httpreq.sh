@@ -233,17 +233,48 @@ _hal_http_parse_body_args() {
 }
 
 # _hal_http_write_curl_file
-# Writes a human-friendly replay command to <base>.curl using printf '%q'
-# quoting.  Uses _HAL_HTTP_REPLAY_ARGS, which omits internal capture flags
-# (-D, -o, --write-out, --silent) and includes -i so the replayed command
-# prints response headers together with the body.
+# Writes a human-friendly, multi-line replay command to <base>.curl.
+# Each flag+value pair occupies its own continuation line (4-space indent).
+# If a flag+value pair would exceed 130 characters, the value is placed on
+# the next line with an 8-space indent.  Standalone tokens (e.g. -i, URL)
+# are never split.
 _hal_http_write_curl_file() {
-    local -a parts=()
+    local -a quoted=()
     local arg
-    for arg in curl "${_HAL_HTTP_REPLAY_ARGS[@]}"; do
-        parts+=("$(printf '%q' "$arg")")
+    for arg in "${_HAL_HTTP_REPLAY_ARGS[@]}"; do
+        quoted+=("$(printf '%q' "$arg")")
     done
-    printf '%s\n' "${parts[*]}" > "${_HAL_HTTP_BASE}.curl"
+
+    local out="${_HAL_HTTP_BASE}.curl"
+    local n=${#quoted[@]}
+    local i=0 token val line
+
+    printf 'curl' > "$out"
+
+    while [[ $i -lt $n ]]; do
+        token="${quoted[$i]}"
+        case "$token" in
+            --header|--cookie|-X|--data|--data-urlencode|\
+            --form|--data-binary|--upload-file)
+                # Flag that always takes exactly one value argument
+                val="${quoted[$((i + 1))]}"
+                line="    ${token} ${val}"
+                if [[ ${#line} -gt 130 ]]; then
+                    # Value too long: place it on the next line, indented further
+                    printf ' \\\n    %s \\\n        %s' "$token" "$val" >> "$out"
+                else
+                    printf ' \\\n    %s' "$line" >> "$out"
+                fi
+                i=$((i + 2))
+                ;;
+            *)
+                # Standalone token: single flag (-i) or URL
+                printf ' \\\n    %s' "$token" >> "$out"
+                i=$((i + 1))
+                ;;
+        esac
+    done
+    printf '\n' >> "$out"
 }
 
 # _hal_http_process_headers <header_file>
