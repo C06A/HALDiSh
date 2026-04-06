@@ -41,10 +41,14 @@ fi
 shopt -s nullglob
 
 for base in "${_bases[@]}"; do
+    printf '== %s\n\n' "$base"
     files=( "${base}".* )
     for f in "${files[@]}"; do
+        printf '=== %s\n\n' "$f"
+        printf '[source,json]\n----\n'
         printf '// tag::%s[]\n' "$f"
         cat -- "$f"
-        printf '// end::%s[]\n' "$f"
+        [ -z "$(tail -c 1 "$f")" ] || printf '\n'
+        printf '// end::%s[]\n----\n' "$f"
     done
 done
