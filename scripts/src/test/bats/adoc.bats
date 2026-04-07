@@ -118,6 +118,79 @@ _adoc() {
     [ -z "$output" ]
 }
 
+# ── -a append mode ────────────────────────────────────────────────────────────
+
+@test "adoc: -a requires a filename argument" {
+    run bash "$ADOC_SH" -a
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"-a requires"* ]]
+}
+
+@test "adoc: -a appends AsciiDoc content to the specified file" {
+    printf 'hello' > "${WORK_DIR}/foo.txt"
+    local out="${WORK_DIR}/out.adoc"
+    run bash -c "cd '${WORK_DIR}' && bash '${ADOC_SH}' -a '${out}' foo"
+    [ "$status" -eq 0 ]
+    [ -f "$out" ]
+    grep -q 'tag::foo.txt' "$out"
+}
+
+@test "adoc: -a prints the base name to stdout" {
+    printf 'hello' > "${WORK_DIR}/foo.txt"
+    local out="${WORK_DIR}/out.adoc"
+    run bash -c "cd '${WORK_DIR}' && bash '${ADOC_SH}' -a '${out}' foo"
+    [ "$status" -eq 0 ]
+    [ "$output" = "foo" ]
+}
+
+@test "adoc: -a stdout contains no AsciiDoc markup" {
+    printf 'hello' > "${WORK_DIR}/foo.txt"
+    local out="${WORK_DIR}/out.adoc"
+    run bash -c "cd '${WORK_DIR}' && bash '${ADOC_SH}' -a '${out}' foo"
+    [ "$status" -eq 0 ]
+    ! [[ "$output" == *"tag::"* ]]
+}
+
+@test "adoc: -a with multiple bases prints each name on its own stdout line" {
+    printf 'a' > "${WORK_DIR}/foo.txt"
+    printf 'b' > "${WORK_DIR}/bar.txt"
+    local out="${WORK_DIR}/out.adoc"
+    run bash -c "cd '${WORK_DIR}' && bash '${ADOC_SH}' -a '${out}' foo bar"
+    [ "$status" -eq 0 ]
+    [ "${lines[0]}" = "foo" ]
+    [ "${lines[1]}" = "bar" ]
+    [ "${#lines[@]}" -eq 2 ]
+}
+
+@test "adoc: -a appends to an existing file without truncating" {
+    printf 'a' > "${WORK_DIR}/foo.txt"
+    local out="${WORK_DIR}/out.adoc"
+    printf 'existing content\n' > "$out"
+    run bash -c "cd '${WORK_DIR}' && bash '${ADOC_SH}' -a '${out}' foo"
+    [ "$status" -eq 0 ]
+    grep -q 'existing content' "$out"
+    grep -q 'tag::foo.txt' "$out"
+}
+
+@test "adoc: -a creates the output file when it does not exist" {
+    printf 'a' > "${WORK_DIR}/foo.txt"
+    local out="${WORK_DIR}/newfile.adoc"
+    [ ! -f "$out" ]
+    run bash -c "cd '${WORK_DIR}' && bash '${ADOC_SH}' -a '${out}' foo"
+    [ "$status" -eq 0 ]
+    [ -f "$out" ]
+}
+
+@test "adoc: -a stdin mode appends content and prints base name to stdout" {
+    printf 'a' > "${WORK_DIR}/foo.txt"
+    local out="${WORK_DIR}/out.adoc"
+    run bash -c "cd '${WORK_DIR}' && echo 'foo' | bash '${ADOC_SH}' -a '${out}'"
+    [ "$status" -eq 0 ]
+    [ -f "$out" ]
+    grep -q 'tag::foo.txt' "$out"
+    [ "$output" = "foo" ]
+}
+
 # ── content fidelity ──────────────────────────────────────────────────────────
 
 @test "adoc: preserves multi-line file content" {

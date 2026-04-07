@@ -24,7 +24,8 @@ set -euo pipefail
 
 _SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PATH="${_SCRIPT_DIR}:${PATH}"
-source "${_SCRIPT_DIR}/env.sh" 2>/dev/null || true
+source "${_SCRIPT_DIR}/env.sh" 2>/dev/null || \
+    source "${_SCRIPT_DIR}/hal_utils.sh" 2>/dev/null || true
 
 # ── constants ─────────────────────────────────────────────────────────────────
 
