@@ -84,7 +84,7 @@ _qr() {
 _qk() {
     local json="$1" key="$2"
     if [[ "$_HAL_TOOL" == yq ]]; then
-        HAL_K="$key" printf '%s' "$json" | yq -o json -I0 '.[env(HAL_K)]'
+        printf '%s' "$json" | HAL_K="$key" yq -o json -I0 '.[env(HAL_K)]'
     else
         printf '%s' "$json" | jq -c --arg k "$key" '.[$k]'
     fi
@@ -94,7 +94,7 @@ _qk() {
 _qkr() {
     local json="$1" key="$2"
     if [[ "$_HAL_TOOL" == yq ]]; then
-        HAL_K="$key" printf '%s' "$json" | yq -o json -r '.[env(HAL_K)]'
+        printf '%s' "$json" | HAL_K="$key" yq -o json -r '.[env(HAL_K)]'
     else
         printf '%s' "$json" | jq -r --arg k "$key" '.[$k]'
     fi

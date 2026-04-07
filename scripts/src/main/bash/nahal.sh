@@ -75,7 +75,7 @@ _brow_qr() {
 # _brow_qk <json> <key>  → object value by key
 _brow_qk() {
     if [[ "$_BROW_TOOL" == yq ]]; then
-        HAL_K="$2" printf '%s' "$1" | yq -o json -I0 '.[env(HAL_K)]'
+        printf '%s' "$1" | HAL_K="$2" yq -o json -I0 '.[env(HAL_K)]'
     else
         printf '%s' "$1" | jq -c --arg k "$2" '.[$k]'
     fi
@@ -84,7 +84,7 @@ _brow_qk() {
 # _brow_qkr <json> <key>  → raw scalar by key
 _brow_qkr() {
     if [[ "$_BROW_TOOL" == yq ]]; then
-        HAL_K="$2" printf '%s' "$1" | yq -o json -r '.[env(HAL_K)]'
+        printf '%s' "$1" | HAL_K="$2" yq -o json -r '.[env(HAL_K)]'
     else
         printf '%s' "$1" | jq -r --arg k "$2" '.[$k]'
     fi
