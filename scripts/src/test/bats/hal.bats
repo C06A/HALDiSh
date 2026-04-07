@@ -279,3 +279,95 @@ _type_line() { printf '%s\n' "$@" >&9; }
     [ "$status" -eq 0 ]
     [[ "$output" == *"Zero"* ]]
 }
+
+# ── yq-specific: key-by-variable lookup (env(HAL_K)) ─────────────────────────
+# These tests skip when yq is absent. When yq is installed hal.sh uses it and
+# _qk/_qkr must pass HAL_K on the yq side of the pipe, not the printf side.
+
+HAL_YAML='_links:
+  self:
+    href: /api/r
+  items:
+    - href: /api/1
+    - href: /api/2
+      templated: true
+  tmpl:
+    href: "/api{?q}"
+    templated: true
+_embedded:
+  items:
+    - _links:
+        self:
+          href: /api/1
+      name: Item 1
+    - _links:
+        self:
+          href: /api/2
+      name: Item 2
+title: Test Resource
+count: 42
+meta:
+  created: "2025-01-01"
+  active: true
+tags:
+  - alpha
+  - beta'
+
+@test "yq: links self href returns scalar value" {
+    command -v yq >/dev/null 2>&1 || skip "yq not installed"
+    run bash "$HAL_SH" "${WORK_DIR}/resource.json" links self href
+    [ "$status" -eq 0 ]
+    [ "$output" = "/api/r" ]
+}
+
+@test "yq: links items 0 href returns first array link href" {
+    command -v yq >/dev/null 2>&1 || skip "yq not installed"
+    run bash "$HAL_SH" "${WORK_DIR}/resource.json" links items 0 href
+    [ "$status" -eq 0 ]
+    [ "$output" = "/api/1" ]
+}
+
+@test "yq: links items 1 href returns second array link href" {
+    command -v yq >/dev/null 2>&1 || skip "yq not installed"
+    run bash "$HAL_SH" "${WORK_DIR}/resource.json" links items 1 href
+    [ "$status" -eq 0 ]
+    [ "$output" = "/api/2" ]
+}
+
+@test "yq: embeddeds items 0 links self href navigates embedded" {
+    command -v yq >/dev/null 2>&1 || skip "yq not installed"
+    run bash "$HAL_SH" "${WORK_DIR}/resource.json" embeddeds items 0 links self href
+    [ "$status" -eq 0 ]
+    [ "$output" = "/api/1" ]
+}
+
+@test "yq: properties title returns string value" {
+    command -v yq >/dev/null 2>&1 || skip "yq not installed"
+    run bash "$HAL_SH" "${WORK_DIR}/resource.json" properties title
+    [ "$status" -eq 0 ]
+    [ "$output" = "Test Resource" ]
+}
+
+@test "yq: parses YAML file and returns link href" {
+    command -v yq >/dev/null 2>&1 || skip "yq not installed"
+    printf '%s\n' "$HAL_YAML" > "${WORK_DIR}/resource.yaml"
+    run bash "$HAL_SH" "${WORK_DIR}/resource.yaml" links self href
+    [ "$status" -eq 0 ]
+    [ "$output" = "/api/r" ]
+}
+
+@test "yq: YAML file links items 0 href returns first array link href" {
+    command -v yq >/dev/null 2>&1 || skip "yq not installed"
+    printf '%s\n' "$HAL_YAML" > "${WORK_DIR}/resource.yaml"
+    run bash "$HAL_SH" "${WORK_DIR}/resource.yaml" links items 0 href
+    [ "$status" -eq 0 ]
+    [ "$output" = "/api/1" ]
+}
+
+@test "yq: YAML file properties title returns string value" {
+    command -v yq >/dev/null 2>&1 || skip "yq not installed"
+    printf '%s\n' "$HAL_YAML" > "${WORK_DIR}/resource.yaml"
+    run bash "$HAL_SH" "${WORK_DIR}/resource.yaml" properties title
+    [ "$status" -eq 0 ]
+    [ "$output" = "Test Resource" ]
+}
