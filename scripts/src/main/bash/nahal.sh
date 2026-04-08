@@ -90,6 +90,22 @@ _brow_qkr() {
     fi
 }
 
+# _brow_qtype <json>  → normalized type: array | object | string | number | boolean | null
+# yq returns YAML type tags (!!seq, !!map, …); this normalises them to jq names.
+_brow_qtype() {
+    local t
+    t=$(_brow_qr "$1" 'type')
+    case "$t" in
+        '!!seq')           printf 'array'   ;;
+        '!!map')           printf 'object'  ;;
+        '!!str')           printf 'string'  ;;
+        '!!int'|'!!float') printf 'number'  ;;
+        '!!bool')          printf 'boolean' ;;
+        '!!null')          printf 'null'    ;;
+        *)                 printf '%s' "$t" ;;
+    esac
+}
+
 # _brow_qi <json> <N>  → array element by index
 _brow_qi() {
     _brow_q "$1" ".[$2]"
@@ -661,7 +677,7 @@ _brow_nav_links() {
         while IFS= read -r rel; do
             local lobj ltype templated suffix=''
             lobj=$(_brow_qk "$links" "$rel")
-            ltype=$(_brow_qr "$lobj" 'type')
+            ltype=$(_brow_qtype "$lobj")
             if [[ "$ltype" == "array" ]]; then
                 templated=$(_brow_qr "$lobj" '.[0].templated // false')
             else
@@ -678,7 +694,7 @@ _brow_nav_links() {
         local rel="${chosen% \{T\}}"
         local lobj ltype
         lobj=$(_brow_qk "$links" "$rel")
-        ltype=$(_brow_qr "$lobj" 'type')
+        ltype=$(_brow_qtype "$lobj")
 
         # If link is an array, let user pick which one
         local link_obj
@@ -742,7 +758,7 @@ _brow_nav_embedded() {
 
         local item itype
         item=$(_brow_qk "$embedded" "$chosen")
-        itype=$(_brow_qr "$item" 'type')
+        itype=$(_brow_qtype "$item")
 
         if [[ "$itype" == "array" ]]; then
             local count idx
@@ -773,7 +789,7 @@ _brow_nav_embedded() {
 _brow_nav_value() {
     local val="$1" label="$2"
     local vtype
-    vtype=$(_brow_qr "$val" 'type')
+    vtype=$(_brow_qtype "$val")
 
     case "$vtype" in
         string|number|boolean|null)

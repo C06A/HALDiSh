@@ -100,6 +100,22 @@ _qkr() {
     fi
 }
 
+# _qtype <json>  → normalized type: array | object | string | number | boolean | null
+# yq returns YAML type tags (!!seq, !!map, …); this normalises them to jq names.
+_qtype() {
+    local t
+    t=$(_qr "$1" 'type')
+    case "$t" in
+        '!!seq')           printf 'array'   ;;
+        '!!map')           printf 'object'  ;;
+        '!!str')           printf 'string'  ;;
+        '!!int'|'!!float') printf 'number'  ;;
+        '!!bool')          printf 'boolean' ;;
+        '!!null')          printf 'null'    ;;
+        *)                 printf '%s' "$t" ;;
+    esac
+}
+
 # _qi <json> <N>  → get array element by integer index
 _qi() {
     local json="$1" idx="$2"
@@ -134,7 +150,7 @@ _traverse_value() {
     local val="$1"; shift
     if [[ $# -eq 0 ]]; then
         local vtype
-        vtype=$(_qr "$val" 'type')
+        vtype=$(_qtype "$val")
         if [[ "$vtype" == "string" ]]; then
             _qr "$val" '.'
         else
@@ -144,7 +160,7 @@ _traverse_value() {
     fi
     local arg="$1"; shift
     local vtype
-    vtype=$(_qr "$val" 'type')
+    vtype=$(_qtype "$val")
     if [[ "$vtype" == "array" ]]; then
         if [[ "$arg" =~ ^[0-9]+$ ]]; then
             local elem
@@ -173,7 +189,7 @@ _traverse() {
 
     local cmd="$1"; shift
     local jtype
-    jtype=$(_qr "$json" 'type')
+    jtype=$(_qtype "$json")
 
     # Top-level array: first arg must be an index
     if [[ "$jtype" == "array" && "$cmd" =~ ^[0-9]+$ ]]; then
@@ -195,7 +211,7 @@ _traverse() {
             local link
             link=$(_qk "$links" "$rel")
             local ltype
-            ltype=$(_qr "$link" 'type')
+            ltype=$(_qtype "$link")
             if [[ "$ltype" == "array" ]]; then
                 if [[ $# -gt 0 && "$1" =~ ^[0-9]+$ ]]; then
                     local idx="$1"; shift
@@ -215,7 +231,7 @@ _traverse() {
             local item
             item=$(_qk "$embedded" "$rel")
             local itype
-            itype=$(_qr "$item" 'type')
+            itype=$(_qtype "$item")
             if [[ "$itype" == "array" ]]; then
                 if [[ $# -gt 0 && "$1" =~ ^[0-9]+$ ]]; then
                     local idx="$1"; shift
@@ -303,7 +319,7 @@ _read_index() {
 _interactive_value() {
     local val="$1" path="$2" is_top="$3"
     local vtype
-    vtype=$(_qr "$val" 'type')
+    vtype=$(_qtype "$val")
 
     if [[ "$vtype" == "array" ]]; then
         local count
@@ -365,7 +381,7 @@ _interactive_link_detail() {
             *)
                 local ftype fval
                 fval=$(_qk "$link" "$chosen")
-                ftype=$(_qr "$fval" 'type')
+                ftype=$(_qtype "$fval")
                 if [[ "$ftype" == "string" || "$ftype" == "number" || "$ftype" == "boolean" ]]; then
                     _qkr "$link" "$chosen"
                 else
@@ -389,7 +405,7 @@ _interactive_links() {
         while IFS= read -r rel; do
             local lobj ltype templated suffix
             lobj=$(_qk "$links" "$rel")
-            ltype=$(_qr "$lobj" 'type')
+            ltype=$(_qtype "$lobj")
             if [[ "$ltype" == "array" ]]; then
                 templated=$(_qr "$lobj" '.[0].templated // false')
             else
@@ -407,7 +423,7 @@ _interactive_links() {
         local rel="${chosen% \{T\}}"
         local lobj ltype
         lobj=$(_qk "$links" "$rel")
-        ltype=$(_qr "$lobj" 'type')
+        ltype=$(_qtype "$lobj")
         if [[ "$ltype" == "array" ]]; then
             local count
             count=$(_qr "$lobj" 'length')
@@ -441,7 +457,7 @@ _interactive_embeddeds() {
         [[ "$chosen" == "return" ]] && return 0
         local item itype
         item=$(_qk "$embedded" "$chosen")
-        itype=$(_qr "$item" 'type')
+        itype=$(_qtype "$item")
         if [[ "$itype" == "array" ]]; then
             local count
             count=$(_qr "$item" 'length')
@@ -476,7 +492,7 @@ _interactive_properties() {
         [[ "$chosen" == "quit"   ]] && { _to_jpath "$path properties"; printf '\n'; exit 0; }
         local val vtype
         val=$(_qk "$props" "$chosen")
-        vtype=$(_qr "$val" 'type')
+        vtype=$(_qtype "$val")
         if [[ "$vtype" == "string" || "$vtype" == "number" || "$vtype" == "boolean" ]]; then
             _qkr "$props" "$chosen"
         else
@@ -534,7 +550,7 @@ fi
 
 if [[ $# -eq 0 ]]; then
     exec 3< "${_MENU_TTY:-/dev/tty}"
-    _jtype=$(_qr "$_hal_json" 'type')
+    _jtype=$(_qtype "$_hal_json")
     if [[ "$_jtype" == "array" ]]; then
         count=$(_qr "$_hal_json" 'length')
         while true; do
