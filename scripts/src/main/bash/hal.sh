@@ -115,12 +115,18 @@ _usage() {
 # _traverse_link <link_json> [field]
 _traverse_link() {
     local link="$1"; shift
-    if [[ $# -eq 0 ]]; then
-        printf '%s\n' "$link"
-        return
+    if [[ $# -gt 0 ]]; then
+        local field="$1"
+        shift
+        link=$(_qkr "$link" "$field")
+        if [[ $# -gt 0 ]]; then
+            field="$1"
+            shift
+            link=$(_qkr "$link" "$field")
+        fi
     fi
-    local field="$1"
-    _qkr "$link" "$field"
+
+    printf '%s\n' "$link"
 }
 
 # _traverse_value <val_json> [args...]
