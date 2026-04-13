@@ -2,7 +2,7 @@
 # =============================================================================
 # demonstrator.sh — HALDiSh example launcher
 #
-# Locates the library installed by `./gradlew :examples:installHaldish`,
+# Locates the library installed by `./gradlew :examples:setup`,
 # sets up the environment, and lets the user choose an example to run.
 #
 # Usage:
