@@ -232,6 +232,13 @@ _hal_http_parse_body_args() {
     done
 }
 
+# _hal_http_write_url_file
+# Writes the URL to <base>.url.
+_hal_http_write_url_file() {
+  local out="${_HAL_HTTP_BASE}.url"
+  printf '%s' "$_HAL_HTTP_URL" >> "$out"
+}
+
 # _hal_http_write_curl_file
 # Writes a human-friendly, multi-line replay command to <base>.curl.
 # Each flag+value pair occupies its own continuation line (4-space indent).
@@ -315,7 +322,9 @@ _hal_http_process_headers() {
 # response body, processes headers/cookies into output files, and prints the
 # base name to stdout. Preserves curl's exit code.
 _hal_http_run() {
+    _hal_http_write_url_file
     _hal_http_write_curl_file
+
     local status_code='' curl_exit=0
     # Temporarily disable errexit: curl may return non-zero (4xx/5xx) which is
     # not an error for us — we still want to capture and save the response.
