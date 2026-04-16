@@ -11,7 +11,8 @@ Generate a commit message for the currently staged files.
 git diff --staged
 ```
 
-Review the staged diff above and write a concise commit message following the style of recent commits:
+Review **only the staged diff above** — do not include unstaged or untracked files in the message.
+Write a concise commit message following the style of recent commits:
 
 ```bash
 git log --oneline -5
