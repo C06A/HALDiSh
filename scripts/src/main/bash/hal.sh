@@ -10,10 +10,6 @@
 # Requires: yq (mikefarah/yq v4), or jq for JSON files
 set -euo pipefail
 
-_SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PATH="${_SCRIPT_DIR}:${PATH}"
-source "${_SCRIPT_DIR}/env.sh" 2>/dev/null || true
-
 _HAL_TOOL=""
 _HAL_FORMAT=""
 
