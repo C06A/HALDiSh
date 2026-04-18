@@ -62,6 +62,9 @@ tasks.register<Exec>("test") {
     }
 
     environment("SCRIPTS_DIR", srcDir.absolutePath)
+    // Scripts are invoked by simple name (no path prefix), so SCRIPTS_DIR must
+    // be on PATH — the same guarantee that bats.sh provides interactively.
+    environment("PATH", "${srcDir.absolutePath}:${System.getenv("PATH")}")
 
     // Run all *.bats files; --tap writes TAP output, --report-formatter junit
     // requires bats ≥ 1.7 — fall back to tap for broader compatibility.

@@ -39,12 +39,12 @@ _make_options() {
 # ── no options → error ────────────────────────────────────────────────────────
 
 @test "menu.sh exits 1 when no options are provided" {
-    run --separate-stderr bash "$MENU_SH" "Pick one"
+    run --separate-stderr bash "$MENU_SH" "Pick one" < /dev/null
     [ "$status" -eq 1 ]
 }
 
 @test "menu.sh prints error to stderr when no options are provided" {
-    run --separate-stderr bash "$MENU_SH" "Pick one"
+    run --separate-stderr bash "$MENU_SH" "Pick one" < /dev/null
     [[ "$stderr" == *"no menu options provided"* ]]
 }
 

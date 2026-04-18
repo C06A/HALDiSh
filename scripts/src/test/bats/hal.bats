@@ -29,6 +29,18 @@ HAL_JSON='{
   "tags":  ["alpha", "beta"]
 }'
 
+CURI_JSON='{
+  "_links": {
+    "self": { "href": "/api/r" },
+    "curies": [
+      { "name": "ex", "href": "https://example.com/docs/{rel}", "templated": true }
+    ],
+    "ex:items": { "href": "/api/items", "title": "Items" },
+    "ex:widget": { "href": "/api/widgets/{id}", "templated": true, "title": "Widget" }
+  },
+  "title": "CURI Resource"
+}'
+
 ARRAY_JSON='[
   { "_links": { "self": { "href": "/api/0" } }, "name": "Zero" },
   { "_links": { "self": { "href": "/api/1" } }, "name": "One" }
@@ -40,6 +52,7 @@ setup() {
     WORK_DIR="$(mktemp -d)"
     printf '%s\n' "$HAL_JSON"   > "${WORK_DIR}/resource.json"
     printf '%s\n' "$ARRAY_JSON" > "${WORK_DIR}/array.json"
+    printf '%s\n' "$CURI_JSON"  > "${WORK_DIR}/curi.json"
 
     # Use a FIFO for _MENU_TTY so sequential reads work across multiple menu.sh
     # subprocess invocations.  fd 9 keeps the write end open so subprocesses
@@ -370,4 +383,60 @@ tags:
     run bash "$HAL_SH" "${WORK_DIR}/resource.yaml" properties title
     [ "$status" -eq 0 ]
     [ "$output" = "Test Resource" ]
+}
+
+# ── non-interactive: docs ─────────────────────────────────────────────────────
+
+@test "hal.sh docs presents interactive menu of CURI-prefixed rels" {
+    # menu: ex:items(1) ex:widget(2) return(3) — select return
+    _type_key '3'
+    run --separate-stderr bash "$HAL_SH" "${WORK_DIR}/curi.json" docs
+    [ "$status" -eq 0 ]
+    [[ "$stderr" == *"ex:items"*  ]]
+    [[ "$stderr" == *"ex:widget"* ]]
+    [[ "$stderr" != *"self"*      ]]
+    [[ "$stderr" != *"curies"*    ]]
+}
+
+@test "hal.sh docs expands CURI template for a given rel" {
+    run bash "$HAL_SH" "${WORK_DIR}/curi.json" docs ex:items
+    [ "$status" -eq 0 ]
+    [ "$output" = "https://example.com/docs/items" ]
+}
+
+@test "hal.sh docs expands CURI template for a second rel" {
+    run bash "$HAL_SH" "${WORK_DIR}/curi.json" docs ex:widget
+    [ "$status" -eq 0 ]
+    [ "$output" = "https://example.com/docs/widget" ]
+}
+
+@test "hal.sh docs exits 1 when no curies defined" {
+    run bash "$HAL_SH" "${WORK_DIR}/resource.json" docs
+    [ "$status" -eq 1 ]
+}
+
+@test "hal.sh docs exits 1 when CURI prefix not found" {
+    run --separate-stderr bash "$HAL_SH" "${WORK_DIR}/curi.json" docs unknown:rel
+    [ "$status" -eq 1 ]
+    [[ "$stderr" == *"unknown"* ]]
+}
+
+# ── interactive: docs option appears for CURI resources ──────────────────────
+
+@test "interactive: docs option appears when resource has curies" {
+    # Resource menu for curi.json: links, docs, properties, print, exit
+    # links(1) docs(2) properties(3) print(4) exit(5)
+    # Select 'exit' directly
+    _type_key '5'
+    run --separate-stderr bash "$HAL_SH" "${WORK_DIR}/curi.json"
+    [ "$status" -eq 0 ]
+    [[ "$stderr" == *"docs"* ]]
+}
+
+@test "interactive: docs not in menu when no curies" {
+    # Resource menu for resource.json: links, embeddeds, properties, print, exit (no docs)
+    _type_key '5'   # exit
+    run --separate-stderr bash "$HAL_SH" "${WORK_DIR}/resource.json"
+    [ "$status" -eq 0 ]
+    [[ "$stderr" != *"docs"* ]]
 }

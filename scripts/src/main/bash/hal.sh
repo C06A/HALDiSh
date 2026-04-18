@@ -6,6 +6,7 @@
 #   hal.sh <file> links [rel [N] [field]]          non-interactive
 #   hal.sh <file> embeddeds [rel [N] [args...]]    non-interactive
 #   hal.sh <file> properties [key [args...]]       non-interactive
+#   hal.sh <file> docs [rel]                       non-interactive: list/expand CURI doc URLs
 #
 # Requires: yq (mikefarah/yq v4), or jq for JSON files
 set -euo pipefail
@@ -119,7 +120,7 @@ _qi() {
 }
 
 _usage() {
-    printf 'Usage: %s <file> [links|embeddeds|properties [...]]\n' "$(basename "$0")" >&2
+    printf 'Usage: %s <file> [links|embeddeds|properties|docs [...]]\n' "$(basename "$0")" >&2
 }
 
 # ── non-interactive traversal ─────────────────────────────────────────────────
@@ -248,6 +249,25 @@ _traverse() {
             val=$(_qk "$props" "$key")
             _traverse_value "$val" "$@"
             ;;
+        docs)
+            local links
+            links=$(_qk "$json" "_links")
+            local has_curies
+            has_curies=$(_qr "$links" 'has("curies")')
+            if [[ "$has_curies" != "true" ]]; then
+                printf 'hal: no curies defined\n' >&2; exit 1
+            fi
+            if [[ $# -eq 0 ]]; then
+                _interactive_docs "$json" "$_hal_file" "1"
+                return
+            fi
+            local rel="$1"; shift
+            local doc_url
+            if ! doc_url=$(_resolve_curi_url "$links" "$rel"); then
+                printf 'hal: no CURI for prefix: %s\n' "${rel%%:*}" >&2; exit 1
+            fi
+            printf '%s\n' "$doc_url"
+            ;;
         *)
             printf 'hal: unknown command: %s\n' "$cmd" >&2; exit 1
             ;;
@@ -340,7 +360,7 @@ _interactive_value() {
             opts+=("print" "return")
             [[ "$is_top" == "1" ]] && opts+=("quit")
             local chosen
-            chosen=$(printf '%s\n' "${opts[@]}" | bash menu.sh "Value")
+            chosen=$(printf '%s\n' "${opts[@]}" | menu.sh "Value")
             case "$chosen" in
                 print)  printf '%s\n' "$val"; ;;
                 return) return 0 ;;
@@ -369,7 +389,7 @@ _interactive_link_detail() {
         while IFS= read -r f; do opts+=("$f"); done <<< "$fields"
         opts+=("print" "return" "quit")
         local chosen
-        chosen=$(printf '%s\n' "${opts[@]}" | bash menu.sh "Link field")
+        chosen=$(printf '%s\n' "${opts[@]}" | menu.sh "Link field")
         case "$chosen" in
             print)  printf '%s\n' "$link" ;;
             return) return 0 ;;
@@ -413,7 +433,7 @@ _interactive_links() {
         done <<< "$rels"
         opts+=("return")
         local chosen
-        chosen=$(printf '%s\n' "${opts[@]}" | bash menu.sh "Link rel")
+        chosen=$(printf '%s\n' "${opts[@]}" | menu.sh "Link rel")
         [[ "$chosen" == "return" ]] && return 0
         # strip suffix
         local rel="${chosen% \{T\}}"
@@ -449,7 +469,7 @@ _interactive_embeddeds() {
         while IFS= read -r rel; do opts+=("$rel"); done <<< "$rels"
         opts+=("return")
         local chosen
-        chosen=$(printf '%s\n' "${opts[@]}" | bash menu.sh "Embedded rel")
+        chosen=$(printf '%s\n' "${opts[@]}" | menu.sh "Embedded rel")
         [[ "$chosen" == "return" ]] && return 0
         local item itype
         item=$(_qk "$embedded" "$chosen")
@@ -483,7 +503,7 @@ _interactive_properties() {
         while IFS= read -r k; do opts+=("$k"); done <<< "$keys"
         opts+=("return" "quit")
         local chosen
-        chosen=$(printf '%s\n' "${opts[@]}" | bash menu.sh "Property")
+        chosen=$(printf '%s\n' "${opts[@]}" | menu.sh "Property")
         [[ "$chosen" == "return" ]] && return 0
         [[ "$chosen" == "quit"   ]] && { _to_jpath "$path properties"; printf '\n'; exit 0; }
         local val vtype
@@ -497,13 +517,99 @@ _interactive_properties() {
     done
 }
 
+# _open_docs <url>  → opens url in default browser
+_open_docs() {
+    local url="$1"
+    printf 'Opening: %s\n' "$url" >&2
+    if command -v open >/dev/null 2>&1; then
+        open "$url"
+    elif command -v xdg-open >/dev/null 2>&1; then
+        xdg-open "$url"
+    else
+        printf 'hal: no browser opener found (tried open, xdg-open)\n' >&2
+    fi
+}
+
+# _resolve_curi_url <links_json> <rel>
+# Expands the CURI href template for <rel> (e.g. "demo:items") and prints the
+# resulting URL.  Prints nothing and returns 1 when no matching CURI is found.
+_resolve_curi_url() {
+    local links="$1" rel="$2"
+    local prefix="${rel%%:*}"
+    local local_name="${rel#*:}"
+    local curies_json curi_count i curi_obj curi_name curi_href
+    curies_json=$(_qk "$links" "curies")
+    curi_count=$(_qr "$curies_json" 'length')
+    for (( i = 0; i < curi_count; i++ )); do
+        curi_obj=$(_qi "$curies_json" "$i")
+        curi_name=$(_qkr "$curi_obj" "name")
+        if [[ "$curi_name" == "$prefix" ]]; then
+            curi_href=$(_qkr "$curi_obj" "href")
+            uritemplate.sh "$curi_href" "rel=${local_name}"
+            return 0
+        fi
+    done
+    return 1
+}
+
+# _interactive_docs <json> <path> <is_top>
+_interactive_docs() {
+    local json="$1" path="$2" is_top="$3"
+    local links
+    links=$(_qk "$json" "_links")
+
+    # Collect defined CURI prefix names
+    local curies_json curi_count i curi_obj
+    curies_json=$(_qk "$links" "curies")
+    curi_count=$(_qr "$curies_json" 'length')
+    local -a defined_names=()
+    for (( i = 0; i < curi_count; i++ )); do
+        curi_obj=$(_qi "$curies_json" "$i")
+        defined_names+=("$(_qkr "$curi_obj" "name")")
+    done
+
+    # Collect rels whose prefix has a matching entry in curies
+    local -a curi_rels=()
+    local rel prefix name
+    while IFS= read -r rel; do
+        if [[ "$rel" == *:* ]]; then
+            prefix="${rel%%:*}"
+            for name in "${defined_names[@]}"; do
+                if [[ "$name" == "$prefix" ]]; then
+                    curi_rels+=("$rel")
+                    break
+                fi
+            done
+        fi
+    done < <(_qr "$links" 'keys[]')
+    if [[ "${#curi_rels[@]}" -eq 0 ]]; then
+        printf 'No CURI-prefixed relations found.\n' >&2
+        return 0
+    fi
+    while true; do
+        _show_path "$path docs"
+        local opts=("${curi_rels[@]}" "return")
+        local chosen
+        chosen=$(printf '%s\n' "${opts[@]}" | menu.sh "Docs rel")
+        [[ "$chosen" == "return" ]] && return 0
+        local doc_url
+        if doc_url=$(_resolve_curi_url "$links" "$chosen"); then
+            _open_docs "$doc_url"
+        else
+            printf 'hal: no CURI found for prefix: %s\n' "${chosen%%:*}" >&2
+        fi
+    done
+}
+
 # _interactive_resource <json> <path> <is_top>
 _interactive_resource() {
     local json="$1" path="$2" is_top="$3"
-    local has_links has_embedded has_props
+    local has_links has_embedded has_props has_docs
     has_links=$(_qr "$json" 'has("_links")')
     has_embedded=$(_qr "$json" 'has("_embedded")')
     has_props=$(_qr "$json" 'del(._links,._embedded) | length > 0')
+    has_docs="false"
+    [[ "$has_links" == "true" ]] && has_docs=$(_qr "$json" '._links | has("curies")')
 
     while true; do
         _show_path "$path"
@@ -511,6 +617,7 @@ _interactive_resource() {
         [[ "$has_links"    == "true" ]] && opts+=("links")
         [[ "$has_embedded" == "true" ]] && opts+=("embeddeds")
         [[ "$has_props"    == "true" ]] && opts+=("properties")
+        [[ "$has_docs"     == "true" ]] && opts+=("docs")
         opts+=("print")
         if [[ "$is_top" == "1" ]]; then
             opts+=("exit")
@@ -518,11 +625,12 @@ _interactive_resource() {
             opts+=("return" "quit")
         fi
         local chosen
-        chosen=$(printf '%s\n' "${opts[@]}" | bash menu.sh "Resource")
+        chosen=$(printf '%s\n' "${opts[@]}" | menu.sh "Resource")
         case "$chosen" in
             links)      _interactive_links      "$json" "$path" "$is_top" ;;
             embeddeds)  _interactive_embeddeds  "$json" "$path" "$is_top" ;;
             properties) _interactive_properties "$json" "$path" "$is_top" ;;
+            docs)       _interactive_docs       "$json" "$path" "$is_top" ;;
             print)      printf '%s\n' "$json" ;;
             exit)       exit 0 ;;
             return)     return 0 ;;

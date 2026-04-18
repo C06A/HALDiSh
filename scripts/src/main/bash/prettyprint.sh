@@ -36,16 +36,7 @@
 # =============================================================================
 set -euo pipefail
 
-# ── optional hal::log stubs ───────────────────────────────────────────────────
-if ! declare -f hal::log::info >/dev/null 2>&1; then
-    hal::log::info()  { printf '[INFO] %s\n' "$*" >&2; }
-fi
-if ! declare -f hal::log::warn >/dev/null 2>&1; then
-    hal::log::warn()  { printf '[WARN] %s\n' "$*" >&2; }
-fi
-if ! declare -f hal::log::error >/dev/null 2>&1; then
-    hal::log::error() { printf '[ERR ] %s\n' "$*" >&2; }
-fi
+. hal_utils.sh
 
 # ── tool discovery ─────────────────────────────────────────────────────────────
 _PP_JQ=$(command -v jq       2>/dev/null || true)
