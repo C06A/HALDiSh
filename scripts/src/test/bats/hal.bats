@@ -41,6 +41,19 @@ CURI_JSON='{
   "title": "CURI Resource"
 }'
 
+MULTI_CURI_JSON='{
+  "_links": {
+    "self": { "href": "/api/r" },
+    "curies": [
+      { "name": "ex",    "href": "https://example.com/docs/{rel}",  "templated": true },
+      { "name": "other", "href": "https://other.example.com/{rel}", "templated": true }
+    ],
+    "ex:items":    { "href": "/api/items" },
+    "other:items": { "href": "/api/v2/items" }
+  },
+  "title": "Multi-CURI Resource"
+}'
+
 ARRAY_JSON='[
   { "_links": { "self": { "href": "/api/0" } }, "name": "Zero" },
   { "_links": { "self": { "href": "/api/1" } }, "name": "One" }
@@ -50,9 +63,10 @@ WORK_DIR=""
 
 setup() {
     WORK_DIR="$(mktemp -d)"
-    printf '%s\n' "$HAL_JSON"   > "${WORK_DIR}/resource.json"
-    printf '%s\n' "$ARRAY_JSON" > "${WORK_DIR}/array.json"
-    printf '%s\n' "$CURI_JSON"  > "${WORK_DIR}/curi.json"
+    printf '%s\n' "$HAL_JSON"        > "${WORK_DIR}/resource.json"
+    printf '%s\n' "$ARRAY_JSON"      > "${WORK_DIR}/array.json"
+    printf '%s\n' "$CURI_JSON"       > "${WORK_DIR}/curi.json"
+    printf '%s\n' "$MULTI_CURI_JSON" > "${WORK_DIR}/multi_curi.json"
 
     # Use a FIFO for _MENU_TTY so sequential reads work across multiple menu.sh
     # subprocess invocations.  fd 9 keeps the write end open so subprocesses
@@ -419,6 +433,32 @@ tags:
     run --separate-stderr bash "$HAL_SH" "${WORK_DIR}/curi.json" docs unknown:rel
     [ "$status" -eq 1 ]
     [[ "$stderr" == *"unknown"* ]]
+}
+
+@test "hal.sh docs resolves bare rel name to CURI-prefixed rel" {
+    run bash "$HAL_SH" "${WORK_DIR}/curi.json" docs items
+    [ "$status" -eq 0 ]
+    [ "$output" = "https://example.com/docs/items" ]
+}
+
+@test "hal.sh docs bare rel exits 1 when no matching CURI rel" {
+    run --separate-stderr bash "$HAL_SH" "${WORK_DIR}/curi.json" docs unknown
+    [ "$status" -eq 1 ]
+    [[ "$stderr" == *"unknown"* ]]
+}
+
+@test "hal.sh docs warns when bare rel matches multiple CURI prefixes" {
+    run --separate-stderr bash "$HAL_SH" "${WORK_DIR}/multi_curi.json" docs items
+    [ "$status" -eq 0 ]
+    [[ "$stderr" == *"warning"* ]]
+    [[ "$stderr" == *"items"*   ]]
+}
+
+@test "hal.sh docs uses first match when bare rel matches multiple CURI prefixes" {
+    run --separate-stderr bash "$HAL_SH" "${WORK_DIR}/multi_curi.json" docs items
+    [ "$status" -eq 0 ]
+    # ex comes before other alphabetically — first match wins
+    [ "$output" = "https://example.com/docs/items" ]
 }
 
 # ── interactive: docs option appears for CURI resources ──────────────────────

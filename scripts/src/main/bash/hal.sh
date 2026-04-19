@@ -262,6 +262,13 @@ _traverse() {
                 return
             fi
             local rel="$1"; shift
+            if [[ "$rel" != *:* ]]; then
+                local full_rel
+                if ! full_rel=$(_find_curi_rel "$links" "$rel"); then
+                    printf 'hal: no CURI rel found for: %s\n' "$rel" >&2; exit 1
+                fi
+                rel="$full_rel"
+            fi
             local doc_url
             if ! doc_url=$(_resolve_curi_url "$links" "$rel"); then
                 printf 'hal: no CURI for prefix: %s\n' "${rel%%:*}" >&2; exit 1
@@ -515,6 +522,42 @@ _interactive_properties() {
             _interactive_value "$val" "$path properties $chosen" "$is_top"
         fi
     done
+}
+
+# _find_curi_rel <links_json> <local_name>
+# Searches _links for rels of the form "<prefix>:<local_name>" whose prefix is
+# defined in curies.  Prints the first matching full rel to stdout.
+# Warns to stderr when multiple different prefixes match (ambiguity).
+# Returns 1 when no match is found.
+_find_curi_rel() {
+    local links="$1" local_name="$2"
+    local curies_json curi_count i curi_obj
+    curies_json=$(_qk "$links" "curies")
+    curi_count=$(_qr "$curies_json" 'length')
+    local -a defined_names=()
+    for (( i = 0; i < curi_count; i++ )); do
+        curi_obj=$(_qi "$curies_json" "$i")
+        defined_names+=("$(_qkr "$curi_obj" "name")")
+    done
+    local -a matches=()
+    local rel prefix name
+    while IFS= read -r rel; do
+        if [[ "$rel" == *:"$local_name" ]]; then
+            prefix="${rel%%:*}"
+            for name in "${defined_names[@]}"; do
+                if [[ "$name" == "$prefix" ]]; then
+                    matches+=("$rel")
+                    break
+                fi
+            done
+        fi
+    done < <(_qr "$links" 'keys[]')
+    [[ "${#matches[@]}" -eq 0 ]] && return 1
+    if [[ "${#matches[@]}" -gt 1 ]]; then
+        printf 'hal: warning: "%s" matches multiple CURI prefixes (%s) — using %s\n' \
+            "$local_name" "${matches[*]}" "${matches[0]}" >&2
+    fi
+    printf '%s\n' "${matches[0]}"
 }
 
 # _open_docs <url>  → opens url in default browser
