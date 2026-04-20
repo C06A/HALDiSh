@@ -313,6 +313,7 @@ _hal_http_process_headers() {
     done < "$header_file"
 }
 
+# List of HTTP status codes at https://www.iana.org/assignments/http-status-codes/http-status-codes.xhtml
 declare -A status_codes
 status_codes["000"]="No request could be sent"
 status_codes["200"]="OK"
