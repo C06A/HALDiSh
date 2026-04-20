@@ -43,11 +43,7 @@
 # =============================================================================
 set -euo pipefail
 
-# ── optional hal::log stubs ───────────────────────────────────────────────────
-# Use hal::log::warn if already available (env-activated session), otherwise stub.
-if ! declare -f hal::log::warn >/dev/null 2>&1; then
-    hal::log::warn() { printf '[WARN] %s\n' "$*" >&2; }
-fi
+. hal_utils.sh
 
 # ── private global state ──────────────────────────────────────────────────────
 declare    _HAL_HTTP_METHOD=''
@@ -351,6 +347,7 @@ _hal_http_run() {
     status_code="$(curl "${_HAL_HTTP_CURL_ARGS[@]}")"
     curl_exit=$?
     set -e
+    hal::log::debug "status code: $status_code"
     printf '%s\n' "$status_code"                                   >"${_HAL_HTTP_BASE}.code"
     printf '%s\n' "$status_code (${status_codes["$status_code"]})" >"${_HAL_HTTP_BASE}.status"
     cp "${_HAL_HTTP_TMPDIR}/body" "${_HAL_HTTP_BASE}.body" 2>/dev/null \

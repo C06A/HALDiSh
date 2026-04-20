@@ -304,7 +304,7 @@ _pp_process() {
 
     local dst="${base}.${ext}"
 
-    hal::log::info "prettyprint: ${src} → ${dst} [${kind}/${enc}]"
+    hal::log::debug "prettyprint: ${src} → ${dst} [${kind}/${enc}]"
 
     if [[ "$src" == "$dst" ]]; then
         # In-place: write to a temp file then replace

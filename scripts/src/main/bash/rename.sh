@@ -22,6 +22,8 @@ if [[ $# -lt 1 ]]; then
     _usage; exit 1
 fi
 
+. hal_utils.sh
+
 new_name="$1"
 
 if [[ $# -ge 2 ]]; then
@@ -32,11 +34,13 @@ else
     _usage; exit 1
 fi
 
+hal::log::debug "rename \"${old_name}.*\" files into \"${new_name}.*\""
+
 shopt -s nullglob
 files=( "${old_name}".* )
 
 if [[ ${#files[@]} -eq 0 ]]; then
-    printf 'rename: no files found matching: %s.*\n' "$old_name" >&2
+    hal::log::warn 'rename: no files found matching: %s.*\n' "$old_name"
     exit 1
 fi
 
