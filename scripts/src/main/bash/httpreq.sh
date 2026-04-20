@@ -317,6 +317,24 @@ _hal_http_process_headers() {
     done < "$header_file"
 }
 
+declare -A status_codes
+status_codes["200"]="OK"
+status_codes["201"]="CREATED"
+status_codes["202"]="ACCEPTED"
+status_codes["204"]="NO CONTENT"
+status_codes["206"]="PARTIAL CONTENT"
+status_codes["302"]="FOUND"
+status_codes["400"]="BAD REQUEST"
+status_codes["401"]="UNAUTHORIZED"
+status_codes["403"]="FORBIDDEN"
+status_codes["404"]="NOT FOUNT"
+status_codes["409"]="CONFLICT"
+status_codes["422"]="UNPROCESSABLE CONTENT"
+status_codes["500"]="INTERNAL SERVE ERROR"
+status_codes["502"]="BAD GATEWAY"
+status_codes["503"]="SERVICE UNAVAILABLE"
+status_codes["504"]="GATEWAY TIMEOUT"
+
 # _hal_http_run
 # Writes the .curl file, executes curl, captures the HTTP status code, copies
 # response body, processes headers/cookies into output files, and prints the
@@ -332,7 +350,8 @@ _hal_http_run() {
     status_code="$(curl "${_HAL_HTTP_CURL_ARGS[@]}")"
     curl_exit=$?
     set -e
-    printf '%s\n' "$status_code"                            > "${_HAL_HTTP_BASE}.status"
+    printf '%s\n' "$status_code"                                   >"${_HAL_HTTP_BASE}.code"
+    printf '%s\n' "$status_code (${status_codes["$status_code"]})" >"${_HAL_HTTP_BASE}.status"
     cp "${_HAL_HTTP_TMPDIR}/body" "${_HAL_HTTP_BASE}.body" 2>/dev/null \
         || touch "${_HAL_HTTP_BASE}.body"
     _hal_http_process_headers "${_HAL_HTTP_TMPDIR}/headers"
