@@ -318,6 +318,7 @@ _hal_http_process_headers() {
 }
 
 declare -A status_codes
+status_codes["000"]="No request could be sent"
 status_codes["200"]="OK"
 status_codes["201"]="CREATED"
 status_codes["202"]="ACCEPTED"
