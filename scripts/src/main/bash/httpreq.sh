@@ -25,8 +25,9 @@
 #   -i             include -i in saved .curl replay command (shows response headers)
 #   -a [text]      plain text body  (--data); omit text to read from stdin
 #   -u [text]      URL-encode body  (--data-urlencode); omit to read from stdin
-#   -f [filename]  multipart file upload (--form basename=@file); repeatable;
-#                  omit filename to upload stdin as raw body (not multipart)
+#   -f [name=]file multipart file upload (--form name=@file); name defaults to
+#                  the file's basename; omit file entirely for raw stdin body
+#   -F name=value  multipart text field (--form name=value); repeatable
 #   -b [filename]  binary body from file (--data-binary @file); omit for stdin
 #   -r [filename]  raw upload (--upload-file); omit filename for stdin
 #
@@ -163,9 +164,9 @@ _hal_http_parse_body_args() {
             -i)
                 _HAL_HTTP_REPLAY_ARGS+=(-i)
                 ;;
-            -a|-u|-f|-b|-r)
+            -a|-u|-f|-F|-b|-r)
                 param=''
-                if [[ $# -gt 0 ]] && ! [[ "$1" =~ ^-[aufbri]$ ]]; then
+                if [[ $# -gt 0 ]] && ! [[ "$1" =~ ^-[aufFbri]$ ]]; then
                     param="$1"; shift
                 fi
                 case "$flag" in
@@ -191,8 +192,13 @@ _hal_http_parse_body_args() {
                         ;;
                     -f)
                         if [[ -n "$param" ]]; then
-                            # Use the file's basename as the multipart field name
-                            fname="$(basename "$param")"
+                            # name=path explicit, or fall back to basename
+                            if [[ "$param" == *=* ]]; then
+                                fname="${param%%=*}"
+                                param="${param#*=}"
+                            else
+                                fname="$(basename "$param")"
+                            fi
                             _HAL_HTTP_CURL_ARGS+=(--form "${fname}=@${param}")
                             _HAL_HTTP_REPLAY_ARGS+=(--form "${fname}=@${param}")
                         else
@@ -200,6 +206,10 @@ _hal_http_parse_body_args() {
                             _HAL_HTTP_CURL_ARGS+=(--data-binary @-)
                             _HAL_HTTP_REPLAY_ARGS+=(--data-binary @-)
                         fi
+                        ;;
+                    -F)
+                        _HAL_HTTP_CURL_ARGS+=(--form "$param")
+                        _HAL_HTTP_REPLAY_ARGS+=(--form "$param")
                         ;;
                     -b)
                         if [[ -n "$param" ]]; then
@@ -369,7 +379,8 @@ _hal_http_usage() {
     printf '  -i             add -i to saved .curl replay (show response headers)\n' >&2
     printf '  -a [text]      --data (ASCII text; omit to read stdin)\n'        >&2
     printf '  -u [text]      --data-urlencode (omit to read stdin)\n'          >&2
-    printf '  -f [filename]  --form basename=@file (repeatable; omit for raw stdin body)\n' >&2
+    printf '  -f [name=]file --form name=@file (name defaults to basename; omit file for raw stdin)\n' >&2
+    printf '  -F name=value  --form name=value (multipart text field; repeatable)\n' >&2
     printf '  -b [filename]  --data-binary @file (omit for stdin)\n'           >&2
     printf '  -r [filename]  --upload-file (omit for stdin)\n'                 >&2
 }

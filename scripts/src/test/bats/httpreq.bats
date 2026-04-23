@@ -506,6 +506,65 @@ MOCK
     ! _curl_has --form
 }
 
+@test "httpreq: -f with name=path uses the explicit name as form field name" {
+    printf 'data\n' > "${WORK_DIR}/test.file"
+    _run_req POST 'https://example.com/' -f "files=${WORK_DIR}/test.file"
+    [ "$status" -eq 0 ]
+    _curl_has_seq --form "files=@${WORK_DIR}/test.file"
+}
+
+@test "httpreq: -f with name=path does not use basename as field name" {
+    printf 'data\n' > "${WORK_DIR}/test.file"
+    _run_req POST 'https://example.com/' -f "files=${WORK_DIR}/test.file"
+    [ "$status" -eq 0 ]
+    ! _curl_has_seq --form "test.file=@${WORK_DIR}/test.file"
+}
+
+@test "httpreq: -f with name=path preserves path with equals sign in filename" {
+    mkdir -p "${WORK_DIR}/sub"
+    printf 'data\n' > "${WORK_DIR}/sub/a=b.txt"
+    _run_req POST 'https://example.com/' -f "myfield=${WORK_DIR}/sub/a=b.txt"
+    [ "$status" -eq 0 ]
+    _curl_has_seq --form "myfield=@${WORK_DIR}/sub/a=b.txt"
+}
+
+# ── body flag: -F ─────────────────────────────────────────────────────────────
+
+@test "httpreq: -F name=value adds --form text field to curl args" {
+    _run_req POST 'https://example.com/' -F 'type=file'
+    [ "$status" -eq 0 ]
+    _curl_has_seq --form 'type=file'
+}
+
+@test "httpreq: multiple -F flags each add a separate --form text part" {
+    _run_req POST 'https://example.com/' -F 'type=file' -F 'version=2'
+    [ "$status" -eq 0 ]
+    _curl_has_seq --form 'type=file'
+    _curl_has_seq --form 'version=2'
+}
+
+@test "httpreq: -F and -f can be combined in the same request" {
+    printf 'data\n' > "${WORK_DIR}/upload.txt"
+    _run_req POST 'https://example.com/' -F 'type=document' -f "${WORK_DIR}/upload.txt"
+    [ "$status" -eq 0 ]
+    _curl_has_seq --form 'type=document'
+    _curl_has_seq --form "upload.txt=@${WORK_DIR}/upload.txt"
+}
+
+@test "httpreq: -F with name=path and -f with name=path build the target curl command" {
+    printf 'data\n' > "${WORK_DIR}/test.file"
+    _run_req POST 'https://example.com/' -F 'type=file' -f "files=${WORK_DIR}/test.file"
+    [ "$status" -eq 0 ]
+    _curl_has_seq --form 'type=file'
+    _curl_has_seq --form "files=@${WORK_DIR}/test.file"
+}
+
+@test "httpreq: -F value appears in .curl replay file" {
+    _run_req POST 'https://example.com/' -F 'type=document'
+    [ "$status" -eq 0 ]
+    grep -qF 'type=document' "${WORK_DIR}/${output}.curl"
+}
+
 # ── body flag: -b ─────────────────────────────────────────────────────────────
 
 @test "httpreq: -b with filename adds --data-binary @file to curl args" {
