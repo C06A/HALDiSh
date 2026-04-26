@@ -765,96 +765,6 @@ echo "Status: $(cat "${base}.status")"
 hal.sh "${base}.body" properties total
 ```
 
-# MockingHAL — local HAL test server
-
-MockingHAL is a self-contained Kotlin/Ktor HTTP server that serves
-canned HAL responses defined in a YAML or JSON configuration file. It is
-useful for developing and testing HALDiSh scripts offline.
-
-## Starting the server
-
-Build and run via Gradle from the repository root:
-
-``` bash
-./gradlew :mockinghal:run
-```
-
-Or build a fat JAR and run it directly:
-
-``` bash
-./gradlew :mockinghal:shadowJar
-java -jar mockinghal/build/libs/mockinghal-<version>-all.jar
-```
-
-The server listens on port 8080. A built-in default configuration is
-loaded on startup so the server is useful immediately.
-
-## Default endpoints
-
-| Method | Path              | Description                                                                                                                                                  |
-|--------|-------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `GET`  | `/`               | API root — HAL with CURIEs pointing to all demo resources.                                                                                                   |
-| `GET`  | `/empty`          | HTTP 204 — empty resource.                                                                                                                                   |
-| `GET`  | `/scalars`        | JSON object with string, integer, float, boolean, null, and array values.                                                                                    |
-| `GET`  | `/json`           | Plain JSON (no HAL extensions).                                                                                                                              |
-| `GET`  | `/xml`            | Plain XML.                                                                                                                                                   |
-| `GET`  | `/yaml`           | Plain YAML.                                                                                                                                                  |
-| `GET`  | `/hal`            | Full HAL demo: all link-object properties, CURIEs, templated links, type hints, language hints, named link arrays, deprecated links, and embedded resources. |
-| `GET`  | `/hal/items`      | HAL collection with embedded items.                                                                                                                          |
-| `GET`  | `/hal/items/{id}` | HAL item; any numeric id is accepted.                                                                                                                        |
-| `GET`  | `/docs`           | HTML documentation index.                                                                                                                                    |
-| `GET`  | `/docs/links`     | HTML reference for HAL `_links`.                                                                                                                             |
-| `GET`  | `/docs/embedded`  | HTML reference for HAL `_embedded`.                                                                                                                          |
-| `GET`  | `/docs/curies`    | HTML reference for HAL CURIEs.                                                                                                                               |
-| `GET`  | `/docs/templated` | HTML reference for URI Templates.                                                                                                                            |
-
-## Replacing the configuration at runtime
-
-A `POST /` replaces all loaded resources with the config supplied in the
-request body. Accepts a plain YAML or JSON body, or a multipart request
-with one config block per part:
-
-``` bash
-# Replace with a new YAML config
-curl -X POST http://localhost:8080/ \
-     -H 'Content-Type: application/yaml' \
-     --data-binary @my-api.yaml
-
-# Multipart: combine several config files
-curl -X POST http://localhost:8080/ \
-     -F part1=@config-a.yaml \
-     -F part2=@config-b.yaml
-```
-
-## Configuration schema
-
-Each top-level key in the YAML is a named resource block. The structure
-is:
-
-``` yaml
-<block-name>:
-  path:
-    <path-or-regex>:
-      method:
-        <METHOD>:
-          code: <http-status>
-          headerOut:
-            <Header-Name>: <value>
-          resource: <inline-body>   # scalar, object, or literal string
-```
-
-Paths are matched as regular expressions, so `"/hal/items/[0-9]+"`
-matches any numeric item ID. When `resource` is a YAML object or array
-it is serialized to JSON; when it is a YAML literal block scalar it is
-served as-is.
-
-## Running MockingHAL with `nahal.sh`
-
-``` bash
-source ~/.local/lib/haldish/env.sh
-nahal.sh http://localhost:8080/
-```
-
 # Examples module
 
 The repository contains a runnable examples module under `examples/`
@@ -912,9 +822,7 @@ repository. No other build-time prerequisites are needed.
 | `./gradlew :scripts:assembleDist`    | Build the `.run` archive at `scripts/build/dist/HALDiSh-<version>.run`.                                          |
 | `./gradlew :examples:installHaldish` | Install the built archive for the examples module.                                                               |
 | `./gradlew :examples:check`          | Syntax-check all example scripts.                                                                                |
-| `./gradlew :mockinghal:run`          | Start the MockingHAL server.                                                                                     |
-| `./gradlew :mockinghal:shadowJar`    | Build the MockingHAL fat JAR.                                                                                    |
-| `./gradlew build`                    | Full build: tests, archive, examples check, MockingHAL JAR.                                                      |
+| `./gradlew build`                    | Full build: tests, archive, and examples check.                                                                  |
 
 ## Test coverage
 
