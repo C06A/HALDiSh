@@ -166,10 +166,10 @@ _curl_has_seq() {
 
 # ── output file contents ──────────────────────────────────────────────────────
 
-@test "httpreq: .status file contains HTTP code from curl" {
+@test "httpreq: .code file contains HTTP code from curl" {
     _run_req GET 'https://example.com/'
     [ "$status" -eq 0 ]
-    [ "$(cat "${WORK_DIR}/${output}.status")" = '200' ]
+    [ "$(cat "${WORK_DIR}/${output}.code")" = '200' ]
 }
 
 @test "httpreq: .body file contains response body" {

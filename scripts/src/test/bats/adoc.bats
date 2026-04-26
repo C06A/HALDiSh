@@ -138,7 +138,7 @@ _adoc() {
 @test "adoc: -a prints the base name to stdout" {
     printf 'hello' > "${WORK_DIR}/foo.txt"
     local out="${WORK_DIR}/out.adoc"
-    run bash -c "cd '${WORK_DIR}' && bash '${ADOC_SH}' -a '${out}' foo"
+    run --separate-stderr bash -c "cd '${WORK_DIR}' && bash '${ADOC_SH}' -a '${out}' foo"
     [ "$status" -eq 0 ]
     [ "$output" = "foo" ]
 }
@@ -155,7 +155,7 @@ _adoc() {
     printf 'a' > "${WORK_DIR}/foo.txt"
     printf 'b' > "${WORK_DIR}/bar.txt"
     local out="${WORK_DIR}/out.adoc"
-    run bash -c "cd '${WORK_DIR}' && bash '${ADOC_SH}' -a '${out}' foo bar"
+    run --separate-stderr bash -c "cd '${WORK_DIR}' && bash '${ADOC_SH}' -a '${out}' foo bar"
     [ "$status" -eq 0 ]
     [ "${lines[0]}" = "foo" ]
     [ "${lines[1]}" = "bar" ]
@@ -184,7 +184,7 @@ _adoc() {
 @test "adoc: -a stdin mode appends content and prints base name to stdout" {
     printf 'a' > "${WORK_DIR}/foo.txt"
     local out="${WORK_DIR}/out.adoc"
-    run bash -c "cd '${WORK_DIR}' && echo 'foo' | bash '${ADOC_SH}' -a '${out}'"
+    run --separate-stderr bash -c "cd '${WORK_DIR}' && echo 'foo' | bash '${ADOC_SH}' -a '${out}'"
     [ "$status" -eq 0 ]
     [ -f "$out" ]
     grep -q 'tag::foo.txt' "$out"
