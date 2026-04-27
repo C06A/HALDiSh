@@ -26,8 +26,9 @@ curl -LO https://github.com/C06A/HALDiSh/releases/latest/download/HALDiSh-<versi
 
 ## From Maven Central
 
-The archive is also published to Maven Central under the coordinates
-`com.helpchoice:haldish:<version>`:
+The archive is also published to [Maven
+Central](https://central.sonatype.com/artifact/com.helpchoice/haldish/versions)
+under the coordinates `com.helpchoice:haldish:<version>`:
 
 ``` bash
 curl -LO "https://repo1.maven.org/maven2/com/helpchoice/haldish/<version>/haldish-<version>.run"
@@ -51,7 +52,7 @@ repositories {
 val haldish: Configuration by configurations.creating
 
 dependencies {
-    haldish("com.helpchoice:haldish:<version>@run")
+    implementation("com.helpchoice.hal:haldish:<version>@run")
 }
 
 val installHaldish by tasks.registering {
@@ -81,7 +82,7 @@ Declare the dependency with type `run` and use the
 ``` xml
 <dependencies>
   <dependency>
-    <groupId>com.helpchoice</groupId>
+    <groupId>com.helpchoice.hal</groupId>
     <artifactId>haldish</artifactId>
     <version>${haldish.version}</version>
     <type>run</type>
@@ -99,7 +100,7 @@ Declare the dependency with type `run` and use the
           <phase>generate-resources</phase>
           <goals><goal>copy-dependencies</goal></goals>
           <configuration>
-            <includeGroupIds>com.helpchoice</includeGroupIds>
+            <includeGroupIds>com.helpchoice.hal</includeGroupIds>
             <outputDirectory>
               ${project.build.directory}/haldish-archive
             </outputDirectory>
@@ -141,7 +142,7 @@ bash HALDiSh-<version>.run
 ```
 
 By default the library is extracted to `~/.local/lib/haldish`. Pass a
-custom prefix with `--prefix`:
+custom installation location with `--prefix`:
 
 ``` bash
 bash HALDiSh-<version>.run --prefix /opt/haldish
@@ -172,8 +173,8 @@ After sourcing:
 - All `hal::*` functions are available in the current shell.
 
 - The library directory is prepended to `PATH`, so scripts such as
-  `menu.sh`, `hal.sh`, `nahal.sh`, and the HTTP method entry-points can
-  be invoked by name.
+  `uritemplate.sh`, `hal.sh`, `adocs.sh`, the HTTP method entry-points,
+  and other can be invoked by name.
 
 - The `HAL_LIB_DIR` environment variable is exported and points to the
   installation directory. Scripts that need to locate the library at
@@ -183,12 +184,26 @@ After sourcing:
 context where the integrity check fails, it returns exit code 1 without
 loading anything.
 
+# `setup.sh` — post-install configuration
+
+Executed automatically by the self-inflatable archive after extraction.
+Can also be run manually:
+
+``` bash
+bash <prefix>/setup.sh [--prefix <dir>]
+```
+
+`setup.sh` verifies the installation, renames `httpreq.sh` to
+`.httpreq.sh`, creates the `GET`, `POST`, `PUT`, `PATCH`, `OPTIONS`, and
+`DELETE` hardlinks, and generates the integrity manifest. It prints
+colourised progress to stdout.
+
 # `hal.sh` — HAL document navigator
 
 Navigate and extract values from
 [HAL](https://stateless.co/hal_specification.html) documents in JSON,
-YAML, or XML format. Requires `yq` (mikefarah/yq v4) for YAML and XML
-files, or `jq` for JSON-only use.
+YAML, or XML format. Requires `yq` (mikefarah/yq v4) for JSON, YAML and
+XML files, and fails back on `jq`, which supports JSON-only use.
 
 ## Usage
 
@@ -197,6 +212,7 @@ hal.sh <file>                                   # interactive
 hal.sh <file> links      [rel [N] [field]]      # non-interactive
 hal.sh <file> embeddeds  [rel [N] [args...]]    # non-interactive
 hal.sh <file> properties [key [args...]]        # non-interactive
+hal.sh <file> docs       [rel]                  # non-interactive
 ```
 
 ## Non-interactive sub-commands
@@ -206,6 +222,7 @@ hal.sh <file> properties [key [args...]]        # non-interactive
 | `links`      | Extract from `_links`. With no further arguments, prints all relation names. With `rel`, returns the link object for that relation. Append `N` for a specific element of an array-valued link. Append `field` (e.g. `href`, `templated`, `title`) to extract a single field from the link object. |
 | `embeddeds`  | Extract from `_embedded`. With no further arguments, prints all relation names. With `rel`, returns the embedded resource (or its array). Append `N` to select an array element, then optionally continue traversing with further sub-commands or field names.                                    |
 | `properties` | Extract top-level properties (those outside `_links` and `_embedded`). With no further arguments, prints all property names. Append `key` to retrieve a value, then optionally traverse further with additional keys or numeric indices.                                                          |
+| `docs`       | With no further arguments, prints all relation names, which may have documentation. Extract documentation URL for provided `rel`.                                                                                                                                                                 |
 
 ## Interactive mode
 
@@ -253,196 +270,76 @@ hal.sh response.body properties total
 hal.sh response.body properties tags 0
 ```
 
-# `nahal.sh` — network-aware HAL browser
+# HTTP client — `httpreq.sh`
 
-An interactive browser that combines HTTP requests with HAL navigation.
-Starting from a URL or an existing HAL resource file, it follows links
-through the API, expands URI templates interactively, and records every
-request as a replayable shell script.
+After activation, the HTTP method entry-points (`GET`, `POST`, `PUT`,
+`PATCH`, `OPTIONS`, `DELETE`) are on `PATH` and can be called directly.
+They are all hardlinks into a single underlying script.
 
-## Usage
+## Basic usage
 
 ``` bash
-nahal.sh <URL>
-nahal.sh <link-text>              # HAL link object supplied as inline JSON/YAML/XML
-nahal.sh <resource-file> [path…]  # start from a saved file; path locates the link
+GET  'https://api.example.com/orders/1'
+POST 'https://api.example.com/orders' -u 'product=widget' -u 'qty=3'
 ```
 
-## Requirements
-
-- `curl`
-
-- `yq` (mikefarah/yq v4) or `jq` (JSON-only)
-
-- The HALDiSh HTTP method entry-points (`GET`, `POST`, …) on `PATH` —
-  provided after activation via `env.sh`.
-
-## Behaviour
-
-On each HTTP response `nahal.sh` inspects the `Content-Type` header and
-takes one of three actions:
-
-| Content-Type class                                                                                                               | Behaviour                                                                                            |
-|----------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------|
-| `application/hal+json`, `application/hal+xml`, `application/hal+yaml`, `application/json`, `application/xml`, `application/yaml` | Parse the body as a HAL resource and present the interactive link / embedded / properties navigator. |
-| `text/*`                                                                                                                         | Print the body to stdout for inspection; offer to re-parse as HAL.                                   |
-| Other (binary)                                                                                                                   | Open with the system default application.                                                            |
-
-Templated links (those with `"templated": true`) are expanded
-interactively: the browser prompts for each template variable and
-supports string, list, and map value types. For `POST`, `PUT`, and
-`PATCH` requests the browser also prompts for a request body (inline
-text, file, URL-encoded, multipart, binary, or raw upload).
-
-## Session log
-
-Every session writes a file `<session-dir>/session.sh` containing the
-exact `curl` commands and `uritemplate.sh` expansions that were
-performed, in order. This script can be replayed later to reproduce the
-session without interaction.
-
-## stdin / stdout / exit codes
-
-| Channel | Content                                                                                 |
-|---------|-----------------------------------------------------------------------------------------|
-| stdin   | Not used directly (TTY is opened separately for interactive input).                     |
-| stdout  | Extracted values and printed bodies during navigation.                                  |
-| stderr  | Progress messages, menu display, prompts.                                               |
-| Exit 0  | User exited the browser normally.                                                       |
-| Exit 1  | Missing dependency (`curl`, `yq`/`jq`, method commands), or fatal error during startup. |
-
-# `menu.sh` — interactive single-selection menu
-
-A keyboard-driven selector that can be composed into any interactive
-script.
-
-## Usage
+The URL can also be read from stdin:
 
 ``` bash
-menu.sh <prompt> <option> <option>...   # prompt and options all as arguments
-menu.sh <prompt>                        # prompt as argument; options from stdin
-menu.sh                                 # first stdin line = prompt; rest = options
+echo 'https://api.example.com/orders/1' | GET
+printf 'https://api.example.com/orders\n' | POST -- -u 'product=widget'
 ```
 
-## stdin / stdout / exit codes
+## Output files
 
-| Channel | Content                                                             |
-|---------|---------------------------------------------------------------------|
-| stdin   | Options (and optionally the prompt) when not supplied as arguments. |
-| stdout  | Text of the chosen option (one line).                               |
-| stderr  | Menu display and echo of the chosen key.                            |
-| Exit 0  | A valid selection was made.                                         |
-| Exit 1  | No options were provided.                                           |
+Each invocation writes a group of files named
+`<domain>_<timestamp-ms>.*` in the current directory and prints the base
+name to stdout. This allows to pipe this script to other scripts like
+`cleanup.sh`, `rename.sh`, etc.
 
-Selection uses a single keypress: digits `1`–`9` then letters `a`–`z`
-(up to 35 options per page). When more than 36 options are present, the
-menu paginates at 30 items per page; press `<` or `>` to move between
-pages.
+| Extension  | Content                                                       |
+|------------|---------------------------------------------------------------|
+| `.curl`    | Shell-quoted `curl` command that exactly replays the request. |
+| `.code`    | The numeric value of the HTTP status code (e.g. `200`).       |
+| `.status`  | HTTP status code with name (e.g. `200 (OK)`).                 |
+| `.headers` | Response headers, one `Name: Value` pair per line.            |
+| `.cookies` | Response cookies, one `name=value` pair per line.             |
+| `.body`    | Raw response body.                                            |
 
-## Examples
+## Request body flags
+
+| Flag            | Description                                                                                          |
+|-----------------|------------------------------------------------------------------------------------------------------|
+| `-a [text]`     | Plain-text or JSON body (`--data`). Omit text to read from stdin.                                    |
+| `-u [text]`     | URL-encoded body (`--data-urlencode`). Repeatable for multiple fields. Omit text to read from stdin. |
+| `-f [file]`     | Multipart file upload (`--form`). Repeatable. Omit file to read from stdin.                          |
+| `-b [file]`     | Binary body from file (`--data-binary @file`). Omit file to read from stdin.                         |
+| `-r [file]`     | Raw upload (`--upload-file`). Omit file to read from stdin.                                          |
+| `-F name=value` | Multipart text field (`--form name=value`). Repeatable for multiple fields.                          |
+| `-i`            | Include `-i` in the saved `.curl` replay file so the replay shows response headers.                  |
+
+## Request headers and cookies
+
+Set request headers via `HTTP_IN_HEADERS` (one `Name: Value` per line)
+or point `HTTP_IN_HEADERS_FILE` at a file with the same format. Cookies
+work the same way via `HTTP_IN_COOKIES` / `HTTP_IN_COOKIES_FILE` (one
+`name=value` per line):
 
 ``` bash
-# All options on the command line
-color=$(menu.sh "Pick a color" Red Green Blue Yellow)
+export HTTP_IN_HEADERS="Authorization: Bearer $TOKEN
+Accept: application/hal+json"
 
-# Options piped via stdin
-method=$(printf 'GET\nPOST\nPUT\nDELETE\n' | menu.sh "HTTP method")
-
-# Both prompt and options from stdin
-env=$(printf 'Target:\ndevelopment\nstaging\nproduction\n' | menu.sh)
-
-# Branching on the selection
-action=$(menu.sh "Action" "Show disk usage" "List processes" "Print directory")
-case "$action" in
-    "Show disk usage")     df -h ;;
-    "List processes")      ps aux | head -10 ;;
-    "Print directory")     pwd ;;
-esac
+GET 'https://api.example.com/orders'
 ```
 
-# `hal_utils.sh` — utility function library
-
-Source this file to load all `hal::*` helper namespaces. It is loaded
-automatically when `env.sh` is sourced. Scripts that only need the
-utilities and not the full PATH setup may source it directly:
+## Pipeline example
 
 ``` bash
-source /path/to/haldish/hal_utils.sh
-```
+source ~/.local/lib/haldish/env.sh
 
-The library is double-source safe: sourcing it a second time is a no-op.
-
-## String utilities — `hal::str::*`
-
-| Function                                  | Description                                           | Return value                                    |
-|-------------------------------------------|-------------------------------------------------------|-------------------------------------------------|
-| `hal::str::trim <string>`                 | Remove leading and trailing whitespace.               | Trimmed string on stdout.                       |
-| `hal::str::upper <string>`                | Convert to uppercase.                                 | Uppercase string on stdout.                     |
-| `hal::str::lower <string>`                | Convert to lowercase.                                 | Lowercase string on stdout.                     |
-| `hal::str::length <string>`               | Character count.                                      | Integer on stdout.                              |
-| `hal::str::contains <haystack> <needle>`  | Test whether haystack contains needle.                | Exit 0 if found, 1 otherwise. No stdout output. |
-| `hal::str::starts_with <string> <prefix>` | Test whether string begins with prefix.               | Exit 0 if true, 1 otherwise. No stdout output.  |
-| `hal::str::ends_with <string> <suffix>`   | Test whether string ends with suffix.                 | Exit 0 if true, 1 otherwise. No stdout output.  |
-| `hal::str::repeat <string> <n>`           | Print string repeated n times, followed by a newline. | Repeated string on stdout.                      |
-
-## Array utilities — `hal::arr::*`
-
-| Function                                    | Description                                                            | Return value                                    |
-|---------------------------------------------|------------------------------------------------------------------------|-------------------------------------------------|
-| `hal::arr::contains <needle> "${array[@]}"` | Test whether needle equals any element in the remaining arguments.     | Exit 0 if found, 1 otherwise. No stdout output. |
-| `hal::arr::join <sep> "${array[@]}"`        | Join all elements with sep and print the result followed by a newline. | Joined string on stdout.                        |
-
-## Filesystem utilities — `hal::fs::*`
-
-| Function                          | Description                                                                |
-|-----------------------------------|----------------------------------------------------------------------------|
-| `hal::fs::exists <path>`          | Return 0 if path exists (file or directory), 1 otherwise.                  |
-| `hal::fs::is_file <path>`         | Return 0 if path is a regular file, 1 otherwise.                           |
-| `hal::fs::is_dir <path>`          | Return 0 if path is a directory, 1 otherwise.                              |
-| `hal::fs::mkdir_p <path>`         | Create directory and all parents; idempotent. No stdout output.            |
-| `hal::fs::extension <path>`       | Print the file extension without the leading dot, or empty string if none. |
-| `hal::fs::basename_no_ext <path>` | Print the filename without directory or extension.                         |
-
-## Logging — `hal::log::*`
-
-All logging functions write to stderr. Color output is disabled
-automatically when stderr is not connected to a terminal. The verbosity
-level is controlled by `HAL_LOG_LEVEL` (default: `info`).
-
-### Log functions
-
-| Function                              | Threshold                                                                 | Description                                                                                              |
-|---------------------------------------|---------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------|
-| `hal::log::trace <message>`           | `trace` (5)                                                               | Dim `[TRC ]` prefix. Most verbose; useful for step-by-step tracing.                                      |
-| `hal::log::debug <message>`           | `debug` (4)                                                               | Magenta `[DBG ]` prefix.                                                                                 |
-| `hal::log::info <message>`            | `info` (3)                                                                | Cyan `[INFO]` prefix.                                                                                    |
-| `hal::log::ok <message>`              | Green `[ OK ]` prefix. Shares the `info` threshold with `hal::log::info`. |                                                                                                          |
-| `hal::log::warn <message>`            | `warn` (2)                                                                | Yellow `[WARN]` prefix.                                                                                  |
-| `hal::log::error <message>`           | `error` (1)                                                               | Red `[ERR ]` prefix.                                                                                     |
-| `hal::log::die <message> [exit-code]` | always                                                                    | Print a red `[ERR ]` line and exit. Default exit code is 1. Always prints regardless of `HAL_LOG_LEVEL`. |
-
-### Log level reference
-
-| `HAL_LOG_LEVEL` value     | Numeric | Messages shown                                |
-|---------------------------|---------|-----------------------------------------------|
-| `off` or `0`              | 0       | None (complete silence)                       |
-| `error`, `err`, or `1`    | 1       | `error`, `die`                                |
-| `warn`, `warning`, or `2` | 2       | `warn`, `error`, `die`                        |
-| `info` *(default)* or `3` | 3       | `info`, `ok`, `warn`, `error`, `die`          |
-| `debug` or `4`            | 4       | `debug`, `info`, `ok`, `warn`, `error`, `die` |
-| `trace` or `5`            | 5       | All messages                                  |
-
-Call `hal::log::init` after changing `HAL_LOG_LEVEL` for the change to
-take effect, or pass the desired level as a direct argument:
-
-``` bash
-# Set level via environment variable, then reload
-export HAL_LOG_LEVEL=warn
-hal::log::init
-
-# Set level as an argument (takes precedence over HAL_LOG_LEVEL)
-hal::log::init debug
-hal::log::debug "Verbose section starts here"
+base=$(GET 'https://api.example.com/orders')
+echo "Status: $(cat "${base}.status")"
+hal.sh "${base}.body" properties total
 ```
 
 # `uritemplate.sh` — RFC 6570 URI Template expander
@@ -455,7 +352,7 @@ Templates. Requires Bash 4.0 or later (for associative arrays).
 ``` bash
 uritemplate.sh <template> [var_binding...]   # template as first argument
 uritemplate.sh -          [var_binding...]   # template read from first stdin line
-echo '<template>' | uritemplate.sh          # template from stdin; no bindings
+echo '<template>' | uritemplate.sh           # template from stdin; no bindings
 ```
 
 Undefined variables are silently omitted from the expansion.
@@ -516,85 +413,7 @@ echo '/items/{id}' | uritemplate.sh - 'id=7'
 # → /items/7
 ```
 
-# `adoc.sh` — AsciiDoc region generator
-
-Wraps files that share a base name in AsciiDoc `tag::` / `end::` regions
-so they can be included directly in documentation with the `include::`
-directive. Designed to work with the output file groups produced by the
-HTTP client (`.curl`, `.status`, `.headers`, `.cookies`, `.body`), but
-accepts any file groups.
-
-## Usage
-
-``` bash
-adoc.sh [-a <file>] <base>...
-printf "base1\nbase2\n" | adoc.sh [-a <file>]
-```
-
-| Option      | Description                                                                                                                                                                                                                                                                        |
-|-------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `-a <file>` | Append the generated AsciiDoc content to `<file>` instead of writing to stdout. In this mode the base name of each processed group is printed to stdout (for piping into further tools). If `<file>` does not yet exist or is empty, a document header is prepended automatically. |
-
-## Output format
-
-For each base name, `adoc.sh` finds all files matching `<base>.*` in the
-current directory and emits a level-2 heading for the group, a level-3
-heading for each file, and a source block wrapping the file content
-between `// tag::<filename>[]` and `// end::<filename>[]` markers.
-
-## stdin / stdout / exit codes
-
-| Channel | Content                                                          |
-|---------|------------------------------------------------------------------|
-| stdin   | Base names (one per line) when none are given as arguments.      |
-| stdout  | AsciiDoc text (default mode) or base name per group (`-a` mode). |
-| stderr  | Not used for normal output.                                      |
-| Exit 0  | All groups processed successfully.                               |
-| Exit 1  | `-a` specified without a filename argument.                      |
-
-## Including regions in documentation
-
-``` asciidoc
-The following request was captured with HALDiSh:
-
-[source,bash]
-----
-include::responses.adoc[tag=jsonplaceholder.typicode.com_1711234567890.curl]
-----
-
-The server responded with HTTP `\include::responses.adoc[tag=jsonplaceholder.typicode.com_1711234567890.status]`:
-
-[source,json]
-----
-include::responses.adoc[tag=jsonplaceholder.typicode.com_1711234567890.body]
-----
-```
-
-## Pipeline example
-
-``` bash
-# Capture a request, rename the files, and append AsciiDoc regions
-base=$(GET 'https://api.example.com/orders/1')
-rename.sh get-order-1 "$base" | adoc.sh -a docs/examples.adoc
-```
-
-# `setup.sh` and `rename.sh` — installation helpers
-
-## `setup.sh` — post-install configuration
-
-Executed automatically by the self-inflatable archive after extraction.
-Can also be run manually:
-
-``` bash
-bash <prefix>/setup.sh [--prefix <dir>]
-```
-
-`setup.sh` verifies the installation, renames `httpreq.sh` to
-`.httpreq.sh`, creates the `GET`, `POST`, `PUT`, `PATCH`, `OPTIONS`, and
-`DELETE` hardlinks, and generates the integrity manifest. It prints
-colourised progress to stdout.
-
-## `rename.sh` — rename a request-file group
+# `rename.sh` — rename a request-file group
 
 Renames all files that share a base name, preserving their extensions.
 
@@ -696,74 +515,308 @@ base=$(GET 'https://api.example.com/items')
 prettyprint.sh -m "$base" | xargs -I{} hal.sh {}.json properties total
 ```
 
-# HTTP client — `httpreq.sh`
+# `cleanup.sh` — request-file group cleaner
 
-After activation, the HTTP method entry-points (`GET`, `POST`, `PUT`,
-`PATCH`, `OPTIONS`, `DELETE`) are on `PATH` and can be called directly.
-They are all hardlinks into a single underlying script.
+Deletes all files that share a base name except those whose extension is
+in the keep list. Designed to remove intermediate HTTP client output
+files (`.curl`, `.status`, `.headers`, `.cookies`) while preserving the
+files you want to keep (e.g. `.body`, `.json`).
 
-## Basic usage
+## Usage
 
 ``` bash
-GET  'https://api.example.com/orders/1'
-POST 'https://api.example.com/orders' -u 'product=widget' -u 'qty=3'
+cleanup.sh <base-name> [keep-ext...]
+cleanup.sh -- [keep-ext...]              # base-name read from stdin
 ```
 
-The URL can also be read from stdin:
+With no keep-extensions every matching `<base-name>.*` file is deleted.
+Extensions are given without the leading dot.
+
+## stdin / stdout / exit codes
+
+| Channel | Content                                                      |
+|---------|--------------------------------------------------------------|
+| stdin   | Base name (when `--` is the first argument).                 |
+| stdout  | Base name (one line), whether or not any files were deleted. |
+| stderr  | Usage message on error.                                      |
+| Exit 0  | Success (including when no matching files exist).            |
+| Exit 1  | No arguments supplied.                                       |
+
+## Examples
 
 ``` bash
-echo 'https://api.example.com/orders/1' | GET
-printf 'https://api.example.com/orders\n' | POST -- -u 'product=widget'
+# Delete everything except the response body
+base=$(GET 'https://api.example.com/orders/1')
+cleanup.sh "$base" body
+
+# Keep body and curl replay; delete headers, cookies, status
+cleanup.sh "$base" body curl
+
+# Delete all matching files
+cleanup.sh "$base"
+
+# Pipeline: fetch → pretty-print → keep only the formatted file
+GET 'https://api.example.com/orders' \
+  | prettyprint.sh -m \
+  | cleanup.sh -- json
 ```
 
-## Output files
+# `adoc.sh` — AsciiDoc region generator
 
-Each invocation writes a group of files named
-`<domain>_<timestamp-ms>.*` in the current directory and prints the base
-name to stdout:
+Wraps files that share a base name in AsciiDoc `tag::` / `end::` regions
+so they can be included directly in documentation with the `include::`
+directive. Designed to work with the output file groups produced by the
+HTTP client (`.curl`, `.status`, `.headers`, `.cookies`, `.body`), but
+accepts any file groups.
 
-| Extension  | Content                                                       |
-|------------|---------------------------------------------------------------|
-| `.curl`    | Shell-quoted `curl` command that exactly replays the request. |
-| `.status`  | HTTP status code (e.g. `200`).                                |
-| `.headers` | Response headers, one `Name: Value` pair per line.            |
-| `.cookies` | Response cookies, one `name=value` pair per line.             |
-| `.body`    | Raw response body.                                            |
-
-## Request body flags
-
-| Flag        | Description                                                                                          |
-|-------------|------------------------------------------------------------------------------------------------------|
-| `-a [text]` | Plain-text or JSON body (`--data`). Omit text to read from stdin.                                    |
-| `-u [text]` | URL-encoded body (`--data-urlencode`). Repeatable for multiple fields. Omit text to read from stdin. |
-| `-f [file]` | Multipart file upload (`--form`). Repeatable. Omit file to read from stdin.                          |
-| `-b [file]` | Binary body from file (`--data-binary @file`). Omit file to read from stdin.                         |
-| `-r [file]` | Raw upload (`--upload-file`). Omit file to read from stdin.                                          |
-| `-i`        | Include `-i` in the saved `.curl` replay file so the replay shows response headers.                  |
-
-## Request headers and cookies
-
-Set request headers via `HTTP_IN_HEADERS` (one `Name: Value` per line)
-or point `HTTP_IN_HEADERS_FILE` at a file with the same format. Cookies
-work the same way via `HTTP_IN_COOKIES` / `HTTP_IN_COOKIES_FILE` (one
-`name=value` per line):
+## Usage
 
 ``` bash
-export HTTP_IN_HEADERS="Authorization: Bearer $TOKEN
-Accept: application/hal+json"
+adoc.sh [-a <file>] <base>...
+printf "base1\nbase2\n" | adoc.sh [-a <file>]
+```
 
-GET 'https://api.example.com/orders'
+| Option      | Description                                                                                                                                                                                                                                                                        |
+|-------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `-a <file>` | Append the generated AsciiDoc content to `<file>` instead of writing to stdout. In this mode the base name of each processed group is printed to stdout (for piping into further tools). If `<file>` does not yet exist or is empty, a document header is prepended automatically. |
+
+## Output format
+
+For each base name, `adoc.sh` finds all files matching `<base>.*` in the
+current directory and emits a level-2 heading for the group, a level-3
+heading for each file, and a source block wrapping the file content
+between `// tag::<filename>[]` and `// end::<filename>[]` markers.
+
+## stdin / stdout / exit codes
+
+| Channel | Content                                                          |
+|---------|------------------------------------------------------------------|
+| stdin   | Base names (one per line) when none are given as arguments.      |
+| stdout  | AsciiDoc text (default mode) or base name per group (`-a` mode). |
+| stderr  | Not used for normal output.                                      |
+| Exit 0  | All groups processed successfully.                               |
+| Exit 1  | `-a` specified without a filename argument.                      |
+
+## Including regions in documentation
+
+``` asciidoc
+The following request was captured with HALDiSh:
+
+[source,bash]
+----
+include::responses.adoc[tag=jsonplaceholder.typicode.com_1711234567890.curl]
+----
+
+The server responded with HTTP `include::responses.adoc[tag=jsonplaceholder.typicode.com_1711234567890.status]`:
+
+[source,json]
+----
+include::responses.adoc[tag=jsonplaceholder.typicode.com_1711234567890.body]
+----
 ```
 
 ## Pipeline example
 
 ``` bash
-source ~/.local/lib/haldish/env.sh
-
-base=$(GET 'https://api.example.com/orders')
-echo "Status: $(cat "${base}.status")"
-hal.sh "${base}.body" properties total
+# Capture a request, rename the files, and append AsciiDoc regions
+GET 'https://api.example.com/orders/1') \
+  | rename.sh get-order-1 "$base" \
+  | adoc.sh -a docs/examples.adoc >/dev/null
 ```
+
+The last redirect will drop the printed name into the 'sink'.
+
+# `hal_utils.sh` — utility function library
+
+Source this file to load all `hal::*` helper namespaces. It is loaded
+automatically when `env.sh` is sourced. Scripts that only need the
+utilities and not the full PATH setup may source it directly:
+
+``` bash
+source /path/to/haldish/hal_utils.sh
+```
+
+The library is double-source safe: sourcing it a second time is a no-op.
+
+## String utilities — `hal::str::*`
+
+| Function                                  | Description                                           | Return value                                    |
+|-------------------------------------------|-------------------------------------------------------|-------------------------------------------------|
+| `hal::str::trim <string>`                 | Remove leading and trailing whitespace.               | Trimmed string on stdout.                       |
+| `hal::str::upper <string>`                | Convert to uppercase.                                 | Uppercase string on stdout.                     |
+| `hal::str::lower <string>`                | Convert to lowercase.                                 | Lowercase string on stdout.                     |
+| `hal::str::length <string>`               | Character count.                                      | Integer on stdout.                              |
+| `hal::str::contains <haystack> <needle>`  | Test whether haystack contains needle.                | Exit 0 if found, 1 otherwise. No stdout output. |
+| `hal::str::starts_with <string> <prefix>` | Test whether string begins with prefix.               | Exit 0 if true, 1 otherwise. No stdout output.  |
+| `hal::str::ends_with <string> <suffix>`   | Test whether string ends with suffix.                 | Exit 0 if true, 1 otherwise. No stdout output.  |
+| `hal::str::repeat <string> <n>`           | Print string repeated n times, followed by a newline. | Repeated string on stdout.                      |
+
+## Array utilities — `hal::arr::*`
+
+| Function                                    | Description                                                            | Return value                                    |
+|---------------------------------------------|------------------------------------------------------------------------|-------------------------------------------------|
+| `hal::arr::contains <needle> "${array[@]}"` | Test whether needle equals any element in the remaining arguments.     | Exit 0 if found, 1 otherwise. No stdout output. |
+| `hal::arr::join <sep> "${array[@]}"`        | Join all elements with sep and print the result followed by a newline. | Joined string on stdout.                        |
+
+## Filesystem utilities — `hal::fs::*`
+
+| Function                          | Description                                                                |
+|-----------------------------------|----------------------------------------------------------------------------|
+| `hal::fs::exists <path>`          | Return 0 if path exists (file or directory), 1 otherwise.                  |
+| `hal::fs::is_file <path>`         | Return 0 if path is a regular file, 1 otherwise.                           |
+| `hal::fs::is_dir <path>`          | Return 0 if path is a directory, 1 otherwise.                              |
+| `hal::fs::mkdir_p <path>`         | Create directory and all parents; idempotent. No stdout output.            |
+| `hal::fs::extension <path>`       | Print the file extension without the leading dot, or empty string if none. |
+| `hal::fs::basename_no_ext <path>` | Print the filename without directory or extension.                         |
+
+## Logging — `hal::log::*`
+
+All logging functions write to stderr. Color output is disabled
+automatically when stderr is not connected to a terminal. The verbosity
+level is controlled by `HAL_LOG_LEVEL` (default: `info`).
+
+### Log functions
+
+| Function                              | Threshold                                                                 | Description                                                                                              |
+|---------------------------------------|---------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------|
+| `hal::log::trace <message>`           | `trace` (5)                                                               | Dim `[TRC ]` prefix. Most verbose; useful for step-by-step tracing.                                      |
+| `hal::log::debug <message>`           | `debug` (4)                                                               | Magenta `[DBG ]` prefix.                                                                                 |
+| `hal::log::info <message>`            | `info` (3)                                                                | Cyan `[INFO]` prefix.                                                                                    |
+| `hal::log::ok <message>`              | Green `[ OK ]` prefix. Shares the `info` threshold with `hal::log::info`. |                                                                                                          |
+| `hal::log::warn <message>`            | `warn` (2)                                                                | Yellow `[WARN]` prefix.                                                                                  |
+| `hal::log::error <message>`           | `error` (1)                                                               | Red `[ERR ]` prefix.                                                                                     |
+| `hal::log::die <message> [exit-code]` | always                                                                    | Print a red `[ERR ]` line and exit. Default exit code is 1. Always prints regardless of `HAL_LOG_LEVEL`. |
+
+### Log level reference
+
+| `HAL_LOG_LEVEL` value     | Numeric | Messages shown                                |
+|---------------------------|---------|-----------------------------------------------|
+| `off` or `0`              | 0       | `die` **only**                                |
+| `error`, `err`, or `1`    | 1       | `error`, `die`                                |
+| `warn`, `warning`, or `2` | 2       | `warn`, `error`, `die`                        |
+| `info` *(default)* or `3` | 3       | `info`, `ok`, `warn`, `error`, `die`          |
+| `debug` or `4`            | 4       | `debug`, `info`, `ok`, `warn`, `error`, `die` |
+| `trace` or `5`            | 5       | All messages                                  |
+
+Call `hal::log::init` after changing `HAL_LOG_LEVEL` for the change to
+take effect, or pass the desired level as a direct argument:
+
+``` bash
+# Set level via environment variable, then reload
+export HAL_LOG_LEVEL=warn
+hal::log::init
+
+# Set level as an argument (takes precedence over HAL_LOG_LEVEL)
+hal::log::init debug
+hal::log::debug "Verbose section starts here"
+```
+
+# `menu.sh` — interactive single-selection menu
+
+A keyboard-driven selector that can be composed into any interactive
+script.
+
+## Usage
+
+``` bash
+menu.sh <prompt> <option> <option>...   # prompt and options all as arguments
+menu.sh <prompt>                        # prompt as argument; options from stdin
+menu.sh                                 # first stdin line = prompt; rest = options
+```
+
+## stdin / stdout / exit codes
+
+| Channel | Content                                                             |
+|---------|---------------------------------------------------------------------|
+| stdin   | Options (and optionally the prompt) when not supplied as arguments. |
+| stdout  | Text of the chosen option (one line).                               |
+| stderr  | Menu display and echo of the chosen key.                            |
+| Exit 0  | A valid selection was made.                                         |
+| Exit 1  | No options were provided.                                           |
+
+Selection uses a single keypress: digits `1`–`9` then letters `a`–`z`
+(up to 35 options per page). When more than 36 options are present, the
+menu paginates at 30 items per page; press `<` or `>` to move between
+pages.
+
+## Examples
+
+``` bash
+# All options on the command line
+color=$(menu.sh "Pick a color" Red Green Blue Yellow)
+
+# Options piped via stdin
+method=$(printf 'GET\nPOST\nPUT\nDELETE\n' | menu.sh "HTTP method")
+
+# Both prompt and options from stdin
+env=$(printf 'Target:\ndevelopment\nstaging\nproduction\n' | menu.sh)
+
+# Branching on the selection
+action=$(menu.sh "Action" "Show disk usage" "List processes" "Print directory")
+case "$action" in
+    "Show disk usage")     df -h ;;
+    "List processes")      ps aux | head -10 ;;
+    "Print directory")     pwd ;;
+esac
+```
+
+# `nahal.sh` — network-aware HAL browser
+
+An interactive browser that combines HTTP requests with HAL navigation.
+Starting from a URL or an existing HAL resource file, it follows links
+through the API, expands URI templates interactively, and records every
+request as a replayable shell script.
+
+## Usage
+
+``` bash
+nahal.sh <URL>
+nahal.sh <link-text>              # HAL link object supplied as inline JSON/YAML/XML
+nahal.sh <resource-file> [path…]  # start from a saved file; path locates the link
+```
+
+## Requirements
+
+- `curl`
+
+- `yq` (mikefarah/yq v4) or `jq` (JSON-only)
+
+- The HALDiSh HTTP method entry-points (`GET`, `POST`, …) on `PATH` —
+  provided after activation via `env.sh`.
+
+## Behaviour
+
+On each HTTP response `nahal.sh` inspects the `Content-Type` header and
+takes one of three actions:
+
+| Content-Type class                                                                                                               | Behaviour                                                                                            |
+|----------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------|
+| `application/hal+json`, `application/hal+xml`, `application/hal+yaml`, `application/json`, `application/xml`, `application/yaml` | Parse the body as a HAL resource and present the interactive link / embedded / properties navigator. |
+| `text/*`                                                                                                                         | Print the body to stdout for inspection; offer to re-parse as HAL.                                   |
+| Other (binary)                                                                                                                   | Open with the system default application.                                                            |
+
+Templated links (those with `"templated": true`) are expanded
+interactively: the browser prompts for each template variable and
+supports string, list, and map value types. For `POST`, `PUT`, and
+`PATCH` requests, the browser also prompts for a request body (inline
+text, file, URL-encoded, multipart, binary, or raw upload).
+
+## Session log
+
+Every session writes a file `<session-dir>/session.sh` containing the
+exact `curl` commands and `uritemplate.sh` expansions that were
+performed, in order. This script can be replayed later to reproduce the
+session without interaction.
+
+## stdin / stdout / exit codes
+
+| Channel | Content                                                                                 |
+|---------|-----------------------------------------------------------------------------------------|
+| stdin   | Not used directly (TTY is opened separately for interactive input).                     |
+| stdout  | Extracted values and printed bodies during navigation.                                  |
+| stderr  | Progress messages, menu display, prompts.                                               |
+| Exit 0  | User exited the browser normally.                                                       |
+| Exit 1  | Missing dependency (`curl`, `yq`/`jq`, method commands), or fatal error during startup. |
 
 # Examples module
 
@@ -793,12 +846,14 @@ bash examples/src/main/bash/demo_httpreq.sh
 
 ## Available examples
 
-| Script            | What it demonstrates                                                                                                                                                                     |
-|-------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `demo_strings.sh` | `hal::str::*` functions: `trim`, `upper`, `lower`, `length`, `contains`, `starts_with`, `ends_with`, `repeat`.                                                                           |
-| `demo_arrays.sh`  | `hal::arr::*` functions: `contains`, `join`.                                                                                                                                             |
-| `demo_menu.sh`    | All three invocation styles of `menu.sh` (all-argument, piped options, full-stdin) and branching on the selected value.                                                                  |
-| `demo_httpreq.sh` | HTTP client against [JSONPlaceholder](https://jsonplaceholder.typicode.com): `GET`, `POST`, `PUT`, `DELETE`, custom request headers, response file inspection, and curl replay commands. |
+| Script                   | What it demonstrates                                                                                                                                                                     |
+|--------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `demo_strings.sh`        | `hal::str::*` functions: `trim`, `upper`, `lower`, `length`, `contains`, `starts_with`, `ends_with`, `repeat`.                                                                           |
+| `demo_arrays.sh`         | `hal::arr::*` functions: `contains`, `join`.                                                                                                                                             |
+| `demo_menu.sh`           | All three invocation styles of `menu.sh` (all-argument, piped options, full-stdin) and branching on the selected value.                                                                  |
+| `demo_httpreq.sh`        | HTTP client against [JSONPlaceholder](https://jsonplaceholder.typicode.com): `GET`, `POST`, `PUT`, `DELETE`, custom request headers, response file inspection, and curl replay commands. |
+| `demo_filesystem.sh`     | `hal::fs::*` functions: `mkdir_p`, `is_dir`, `is_file`, `exists`, `extension`, `basename_no_ext`.                                                                                        |
+| `demo_periodic_table.sh` | Interactive periodic-table of elements browser built with `menu.sh`: multi-level menus, category filtering, and element detail display.                                                  |
 
 ## Gradle tasks for the examples module
 
@@ -819,7 +874,7 @@ repository. No other build-time prerequisites are needed.
 |--------------------------------------|------------------------------------------------------------------------------------------------------------------|
 | `./gradlew :scripts:test`            | Run the full BATS test suite (downloads bats-core 1.10.0 automatically into `scripts/build/bats/` on first run). |
 | `./gradlew :scripts:installBats`     | Download bats-core without running tests.                                                                        |
-| `./gradlew :scripts:assembleDist`    | Build the `.run` archive at `scripts/build/dist/HALDiSh-<version>.run`.                                          |
+| `./gradlew :scripts:assembleDist`    | Build the archive at `scripts/build/dist/HALDiSh-<version>.run`.                                                 |
 | `./gradlew :examples:installHaldish` | Install the built archive for the examples module.                                                               |
 | `./gradlew :examples:check`          | Syntax-check all example scripts.                                                                                |
 | `./gradlew build`                    | Full build: tests, archive, and examples check.                                                                  |
