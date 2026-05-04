@@ -361,7 +361,7 @@ MOCK
 }
 
 @test "httpreq: .curl file with --header spans across multiple lines" {
-    HTTP_IN_HEADERS='Authorization: Bearer token123' \
+    HTTP_IN_HEADERS='Authorization:Bearer token123' \
         _run_req GET 'https://example.com/'
     [ "$status" -eq 0 ]
     local line_count
@@ -373,14 +373,14 @@ MOCK
 # ── HTTP_IN_HEADERS env var ───────────────────────────────────────────────────
 
 @test "httpreq: HTTP_IN_HEADERS single header becomes --header curl arg" {
-    HTTP_IN_HEADERS='Authorization: Bearer token123' \
+    HTTP_IN_HEADERS='Authorization:Bearer token123' \
         _run_req GET 'https://example.com/'
     [ "$status" -eq 0 ]
     _curl_has_seq --header 'Authorization: Bearer token123'
 }
 
 @test "httpreq: HTTP_IN_HEADERS multiple headers each become separate --header args" {
-    HTTP_IN_HEADERS=$'Accept: application/json\nX-Api-Version: 2' \
+    HTTP_IN_HEADERS=$'Accept:application/json\nX-Api-Version: 2' \
         _run_req GET 'https://example.com/'
     [ "$status" -eq 0 ]
     _curl_has_seq --header 'Accept: application/json'
@@ -388,7 +388,7 @@ MOCK
 }
 
 @test "httpreq: HTTP_IN_HEADERS blank lines are ignored" {
-    HTTP_IN_HEADERS=$'Accept: text/plain\n\nX-Custom: val' \
+    HTTP_IN_HEADERS=$'Accept:text/plain\n\nX-Custom: val' \
         _run_req GET 'https://example.com/'
     [ "$status" -eq 0 ]
     # Exactly 2 --header args, not 3

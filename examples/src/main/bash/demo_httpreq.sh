@@ -32,7 +32,7 @@ _demo_out="${_demo_root}/http"
 mkdir -p "$_demo_out"
 
 # All requests carry Accept: application/json
-export HTTP_IN_HEADERS='Accept: application/json'
+export HTTP_IN_HEADERS='Accept:application/json'
 
 _BASE='https://jsonplaceholder.typicode.com'
 
@@ -113,7 +113,7 @@ while true; do
             )
             ;;
         "GET  /posts/1 + custom header"*)
-            HTTP_IN_HEADERS=$'Accept: application/json\nX-Client: HALDiSh'
+            HTTP_IN_HEADERS=$'Accept:application/json\nX-Client: HALDiSh'
             ;;
         "Inspect last .curl file")
             last=$(ls -t "${_demo_out}"/*.curl 2>/dev/null | head -1 || true)

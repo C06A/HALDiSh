@@ -218,7 +218,7 @@ _brow_do_request() {
 
     local base='' rc=0
     set +e
-    HTTP_IN_HEADERS="Accept: ${accept}" \
+    HTTP_IN_HEADERS="Accept:${accept}" \
         base=$(cd "$_BROW_OUTDIR" && "$method" "$url" "$@" 2>/dev/null)
     rc=$?
     set -e

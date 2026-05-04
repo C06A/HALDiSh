@@ -154,7 +154,7 @@ _hal_http_expand_link() {
     fi
     [[ -n "$href" ]] || hal::log::die '--link: link object has no href field'
     if [[ -n "$type" && "$type" != 'null' ]]; then
-        HTTP_IN_HEADERS="Accept: ${type}${HTTP_IN_HEADERS:+$'\n'${HTTP_IN_HEADERS}}"
+        HTTP_IN_HEADERS="Accept:${type}${HTTP_IN_HEADERS:+$'\n'${HTTP_IN_HEADERS}}"
     fi
     _hal_http_parse_url "$href"
 }
