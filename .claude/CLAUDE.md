@@ -40,6 +40,8 @@ All scripts live in `scripts/src/main/bash/`. Tests live in `scripts/src/test/ba
 | `env.sh` | Activation script — `source env.sh` to load the library and add the directory to `PATH`. Calls `validate.sh` first. |
 | `hal.sh` | Navigate HAL JSON/YAML/XML documents: interactive or `hal.sh <file> links|embeddeds|properties|docs [path…]`. |
 | `hallink.sh` | Resolve a HAL link object's `href`, expanding URI templates. Two modes: `--link <obj>` or `<file> <hal-path>`. |
+| `haldoclink.sh` | Emit a documentation link `{"href":"<doc_url>","type":"text/html"}` for a CURIE-prefixed relation. Searches `_links.curies` from the deepest embedded resource up to the root. `<file> <hal-path>` only. |
+| `halprepend.sh` | Prepend a base string to a HAL link object's `href`. Two modes: `--link <obj>` or `<file> <hal-path>`. Format-preserving (JSON/YAML/XML). |
 | `httpreq.sh` | HTTP dispatcher. Invoked via method-named hardlinks (`GET`, `POST`, …) that all point to `.httpreq.sh`. Outputs a family of files: `<base>.body`, `<base>.headers`, `<base>.code`, `<base>.curl`, etc. |
 | `uritemplate.sh` | RFC 6570 URI template expansion. Called as a subprocess by `hal.sh` and `hallink.sh`. |
 | `nahal.sh` | Interactive HAL API browser. Fetches URLs using `httpreq.sh`, classifies responses by Content-Type, and navigates via `hal.sh`. Logs a replayable `session.sh`. |
