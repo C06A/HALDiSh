@@ -12,8 +12,11 @@
 # Usage:
 #   GET  <url> [body-flags...]
 #   POST <url> [body-flags...]
-#   POST --    [body-flags...]     # URL read from first stdin line
-#   POST                           # URL read from first stdin line (no body flags)
+#   POST --    [body-flags...]              # URL read from first stdin line
+#   POST                                   # URL read from first stdin line (no body flags)
+#   GET  --link <json> [body-flags...]     # HAL link object: href→URL, type→Accept
+#   GET  --link @<file> [body-flags...]    # HAL link from file
+#   GET  --link [body-flags...]            # HAL link read from stdin
 #
 # Environment:
 #   HTTP_IN_HEADERS       newline-separated "Name: Value" header lines
@@ -74,6 +77,7 @@ _hal_http_parse_url() {
     domain="${domain%%#*}"    # strip fragment
     domain="${domain##*@}"    # strip userinfo (user:pass@)
     domain="${domain%%:*}"    # strip port number
+    domain="${domain:-hal}"   # fallback for relative hrefs (no scheme/host)
     local ts_ms
     ts_ms=$(( $(date +%s) * 1000 ))
     _HAL_HTTP_URL="$url"
@@ -130,6 +134,29 @@ _hal_http_add_cookies() {
         _HAL_HTTP_CURL_ARGS+=(--cookie "$joined")
         _HAL_HTTP_REPLAY_ARGS+=(--cookie "$joined")
     fi
+}
+
+# _hal_http_expand_link <json>
+# Parses a HAL link JSON object. Sets _HAL_HTTP_URL (via _hal_http_parse_url)
+# from the href field and prepends "Accept: <type>" to HTTP_IN_HEADERS when
+# the link carries a type field.
+_hal_http_expand_link() {
+    local json="$1"
+    local href type
+    if command -v jq >/dev/null 2>&1; then
+        href=$(jq -r '.href // ""' <<< "$json" 2>/dev/null)
+        type=$(jq -r '.type // ""' <<< "$json" 2>/dev/null)
+    elif command -v yq >/dev/null 2>&1; then
+        href=$(yq -r '.href // ""' <<< "$json" 2>/dev/null)
+        type=$(yq -r '.type // ""' <<< "$json" 2>/dev/null)
+    else
+        hal::log::die '--link requires jq or yq'
+    fi
+    [[ -n "$href" ]] || hal::log::die '--link: link object has no href field'
+    if [[ -n "$type" && "$type" != 'null' ]]; then
+        HTTP_IN_HEADERS="Accept: ${type}${HTTP_IN_HEADERS:+$'\n'${HTTP_IN_HEADERS}}"
+    fi
+    _hal_http_parse_url "$href"
 }
 
 # _hal_http_build_base_args
@@ -373,9 +400,12 @@ _hal_http_run() {
 _hal_http_usage() {
     local name
     name="$(basename "$0")"
-    printf 'Usage: %s <url> [flags...]\n'                             "$name" >&2
-    printf '       %s -- [flags...]         (URL from stdin)\n'       "$name" >&2
-    printf '\nFlags:\n'                                                          >&2
+    printf 'Usage: %s <url> [flags...]\n'                                     "$name" >&2
+    printf '       %s -- [flags...]             (URL from stdin)\n'             "$name" >&2
+    printf '       %s --link <json> [flags...]  (HAL link: href→URL, type→Accept)\n' "$name" >&2
+    printf '       %s --link @<file> [flags...]  (HAL link from file)\n'        "$name" >&2
+    printf '       %s --link [flags...]          (HAL link from stdin)\n'       "$name" >&2
+    printf '\nFlags:\n'                                                                    >&2
     printf '  -i             add -i to saved .curl replay (show response headers)\n' >&2
     printf '  -a [text]      --data (ASCII text; omit to read stdin)\n'        >&2
     printf '  -u [text]      --data-urlencode (omit to read stdin)\n'          >&2
@@ -404,6 +434,24 @@ elif [[ "$1" == '--' ]]; then
     IFS= read -r _hal_http_url_tmp
     _hal_http_parse_url "$_hal_http_url_tmp"
     # $@ now holds the body flags
+elif [[ "$1" == '--link' ]]; then
+    shift
+    _hal_link_json=''
+    if [[ $# -gt 0 && "$1" != -* ]]; then
+        # Next arg is the link value (inline JSON or @file reference)
+        _hal_link_json="$1"; shift
+        [[ "$_hal_link_json" == @* ]] && _hal_link_json=$(<"${_hal_link_json#@}")
+    else
+        # No link value (or next arg is a body flag): read link JSON from stdin
+        if [[ -t 0 ]]; then
+            printf '%s: --link: no link argument and stdin is a terminal\n' \
+                "$(basename "$0")" >&2
+            exit 1
+        fi
+        _hal_link_json=$(cat)
+    fi
+    _hal_http_expand_link "$_hal_link_json"
+    # $@ now holds body flags
 else
     # Normal: first arg is URL, rest are body flags
     _hal_http_parse_url "$1"

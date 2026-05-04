@@ -5,7 +5,7 @@
 
 # SCRIPTS_DIR is injected by Gradle; fall back to a relative path for manual
 # runs from the repo root.
-SCRIPTS_DIR="${SCRIPTS_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../main/bash" && pwd)}"
+SCRIPTS_DIR="$(cd "${SCRIPTS_DIR:-$(dirname "${BASH_SOURCE[0]}")/../../../main/bash}" && pwd)"
 
 load_lib() {
     source "${SCRIPTS_DIR}/${1}"

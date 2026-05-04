@@ -594,3 +594,72 @@ MOCK
     [ "$status" -eq 0 ]
     _curl_has_seq --upload-file -
 }
+
+# ── --link flag ───────────────────────────────────────────────────────────────
+
+@test "httpreq: --link inline JSON uses href as the request URL" {
+    _run_req GET '--link' '{"href":"https://link.example.com/"}'
+    [ "$status" -eq 0 ]
+    _curl_has 'https://link.example.com/'
+}
+
+@test "httpreq: --link with type field adds Accept header to request" {
+    _run_req GET '--link' '{"href":"https://example.com/","type":"application/hal+json"}'
+    [ "$status" -eq 0 ]
+    _curl_has_seq --header 'Accept: application/hal+json'
+}
+
+@test "httpreq: --link without type field does not inject Accept header" {
+    _run_req GET '--link' '{"href":"https://example.com/"}'
+    [ "$status" -eq 0 ]
+    _read_curl_args
+    local i found=0
+    for (( i=0; i < ${#_curl_args[@]}-1; i++ )); do
+        if [[ "${_curl_args[$i]}" == '--header' && "${_curl_args[$((i+1))]}" == "Accept:"* ]]; then
+            found=1; break
+        fi
+    done
+    [ "$found" -eq 0 ]
+}
+
+@test "httpreq: --link @file reads link JSON from a file" {
+    printf '{"href":"https://file.example.com/"}' > "${WORK_DIR}/link.json"
+    _run_req GET '--link' "@${WORK_DIR}/link.json"
+    [ "$status" -eq 0 ]
+    _curl_has 'https://file.example.com/'
+}
+
+@test "httpreq: --link reads link JSON from stdin when no argument given" {
+    run bash -c "cd '$WORK_DIR' && printf '{\"href\":\"https://stdin.example.com/\"}' | '${WORK_DIR}/GET' --link"
+    [ "$status" -eq 0 ]
+    _curl_has 'https://stdin.example.com/'
+}
+
+@test "httpreq: --link passes body flags through to curl" {
+    _run_req POST '--link' '{"href":"https://example.com/"}' -a 'key=val'
+    [ "$status" -eq 0 ]
+    _curl_has_seq --data 'key=val'
+}
+
+@test "httpreq: --link JSON object with no href field exits non-zero" {
+    run bash -c "cd '$WORK_DIR' && '${WORK_DIR}/GET' --link '{\"title\":\"no href\"}'"
+    [ "$status" -ne 0 ]
+}
+
+@test "httpreq: --link with no argument and empty stdin exits non-zero" {
+    run bash -c "cd '$WORK_DIR' && '${WORK_DIR}/GET' --link < /dev/null"
+    [ "$status" -ne 0 ]
+}
+
+@test "httpreq: --link relative href produces base name starting with 'hal_'" {
+    _run_req GET '--link' '{"href":"/relative/path"}'
+    [ "$status" -eq 0 ]
+    [[ "$output" == hal_* ]]
+}
+
+@test "httpreq: --link type field appears as Accept header in .curl replay file" {
+    _run_req GET '--link' '{"href":"https://example.com/","type":"application/hal+json"}'
+    [ "$status" -eq 0 ]
+    # .curl stores shell-quoted args; the space in the header value is backslash-escaped
+    grep -qF 'Accept:\ application/hal+json' "${WORK_DIR}/${output}.curl"
+}
