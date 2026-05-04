@@ -212,7 +212,8 @@ hal.sh <file>                                   # interactive
 hal.sh <file> links      [rel [N] [field]]      # non-interactive
 hal.sh <file> embeddeds  [rel [N] [args...]]    # non-interactive
 hal.sh <file> properties [key [args...]]        # non-interactive
-hal.sh <file> docs       [rel]                  # non-interactive
+hal.sh <file> docs                              # interactive docs browser
+hal.sh <file> docs       <rel>                  # non-interactive: print doc URL
 ```
 
 ## Non-interactive sub-commands
@@ -222,7 +223,7 @@ hal.sh <file> docs       [rel]                  # non-interactive
 | `links`      | Extract from `_links`. With no further arguments, prints all relation names. With `rel`, returns the link object for that relation. Append `N` for a specific element of an array-valued link. Append `field` (e.g. `href`, `templated`, `title`) to extract a single field from the link object. |
 | `embeddeds`  | Extract from `_embedded`. With no further arguments, prints all relation names. With `rel`, returns the embedded resource (or its array). Append `N` to select an array element, then optionally continue traversing with further sub-commands or field names.                                    |
 | `properties` | Extract top-level properties (those outside `_links` and `_embedded`). With no further arguments, prints all property names. Append `key` to retrieve a value, then optionally traverse further with additional keys or numeric indices.                                                          |
-| `docs`       | With no further arguments, prints all relation names, which may have documentation. Extract documentation URL for provided `rel`.                                                                                                                                                                 |
+| `docs`       | With no `rel`, opens an interactive documentation browser listing the curie-defined relations available in the current resource. With `rel` (curie-prefixed or local name), prints the documentation URL to stdout.                                                                               |
 
 ## Interactive mode
 
@@ -270,53 +271,234 @@ hal.sh response.body properties total
 hal.sh response.body properties tags 0
 ```
 
+# `hallink.sh` — resolve a HAL link object’s href
+
+Resolves a HAL link object’s `href` field, expanding URI templates when
+the link carries `"templated": true`. Accepts a link object directly or
+navigates to one through a HAL document file. Output format matches the
+input format (JSON → JSON, YAML → YAML, XML → XML).
+
+Requires `yq` (mikefarah/yq v4) or `jq` for JSON; `uritemplate.sh` on
+PATH.
+
+## Usage
+
+``` bash
+hallink.sh --link [<json|xml|yaml>|@<file>] [var=value ...]
+hallink.sh --link                           [var=value ...]  # link from stdin
+hallink.sh <file-or-basename> <hal-path>    [var=value ...]
+```
+
+`hal-path`: `links <rel> [N]` or `embeddeds <rel> [N] links <rel2> [N2]`
+
+`--link` accepts an inline JSON, YAML, or XML link object, a path
+prefixed with `@` to read from a file, or reads from stdin when no
+argument follows `--link`.
+
+File basenames (no `/`) are resolved in the current directory against
+the extensions `.json`, `.xml`, `.yaml`, `.yml`, `.body` in that order.
+
+Variable bindings (`var=value`) follow the same syntax as
+`uritemplate.sh`; see [Variable binding
+syntax](#_uritemplate_sh_rfc_6570_uri_template_expander).
+
+## Exit codes
+
+| Code | Meaning                           |
+|------|-----------------------------------|
+| 0    | Success.                          |
+| 1    | Usage or argument error.          |
+| 2    | File not found.                   |
+| 3    | Link not found or missing `href`. |
+| 4    | Required tool not available.      |
+
+## Examples
+
+``` bash
+# Resolve the href of the self link
+hallink.sh resource.json links self
+
+# Expand a templated link with query variables
+hallink.sh resource.json links search 'q=widgets' 'page=2'
+
+# Resolve from an embedded resource
+hallink.sh resource.json embeddeds items 0 links self
+
+# Pass a link object inline (template expansion)
+hallink.sh --link '{"href":"/api{?q}","templated":true}' 'q=hello'
+
+# Read link from a file
+hallink.sh --link @order-link.json
+
+# Pipe the resolved link into an HTTP request
+hallink.sh resource.json links next \
+  | GET --link
+```
+
+# `haldoclink.sh` — emit a documentation link for a HAL link relation
+
+Resolves the documentation URL for a HAL link relation by expanding the
+matching curie template, then outputs a HAL link object with that URL as
+`href` and `"type":"text/html"`.
+
+Curie lookup starts at the deepest embedded resource that contains the
+target link and walks up through each enclosing embedded resource to the
+root, using the first ancestor whose `_links.curies` defines the
+required prefix.
+
+The relation name may be given as a full curie-prefixed key (e.g.
+`doc:orders`) or just the local name (e.g. `orders`). When no prefix is
+supplied the script scans the containing resource’s `_links` for a key
+whose suffix matches.
+
+Output format matches the input format (JSON → JSON, YAML → YAML, XML →
+XML).
+
+Requires `yq` (mikefarah/yq v4) or `jq` for JSON; `uritemplate.sh` on
+PATH.
+
+## Usage
+
+``` bash
+haldoclink.sh <file-or-basename> <hal-path>
+```
+
+`hal-path`: `links <rel>` or `embeddeds <rel> [N] links <rel2>`
+
+File basenames are resolved using the same extension search order as
+[`hallink.sh`](#_hallink_sh_resolve_a_hal_link_object_s_href).
+
+## Exit codes
+
+| Code | Meaning                                                                        |
+|------|--------------------------------------------------------------------------------|
+| 0    | Success.                                                                       |
+| 1    | Usage or argument error.                                                       |
+| 2    | File not found.                                                                |
+| 3    | Relation not found, or no curie for its prefix anywhere in the resource stack. |
+| 4    | Required tool not available.                                                   |
+
+## Examples
+
+``` bash
+# Documentation link for a root-level relation (explicit curie prefix)
+haldoclink.sh resource.json links doc:orders
+# → {"href":"https://example.com/docs/orders","type":"text/html"}
+
+# Same result using just the local name
+haldoclink.sh resource.json links orders
+
+# Documentation for a relation in an embedded resource
+haldoclink.sh resource.json embeddeds orders 0 links ns:detail
+
+# The curie may be defined at root even when the link lives deep
+haldoclink.sh resource.json embeddeds orders 0 embeddeds items 0 links doc:part
+
+# Open the documentation page directly
+haldoclink.sh resource.json links doc:orders \
+  | jq -r .href | xargs open
+```
+
+# `halprepend.sh` — prepend a base URL to a HAL link’s href
+
+Replaces a HAL link object’s `href` field with `<base> + <href>`,
+leaving all other fields (`title`, `type`, `templated`, …) unchanged.
+Accepts a link object directly or navigates to one through a HAL
+document file. Output format matches the input format (JSON → JSON, YAML
+→ YAML, XML → XML).
+
+Requires `yq` (mikefarah/yq v4) or `jq` for JSON.
+
+## Usage
+
+``` bash
+halprepend.sh <base> --link [<json|xml|yaml>|@<file>]
+halprepend.sh <base> --link                             # link from stdin
+halprepend.sh <base> <file-or-basename> <hal-path>
+```
+
+`hal-path`: `links <rel> [N]` or `embeddeds <rel> [N] links <rel2> [N2]`
+
+File basenames are resolved using the same extension search order as
+[`hallink.sh`](#_hallink_sh_resolve_a_hal_link_object_s_href).
+
+## Exit codes
+
+| Code | Meaning                           |
+|------|-----------------------------------|
+| 0    | Success.                          |
+| 1    | Usage or argument error.          |
+| 2    | File not found.                   |
+| 3    | Link not found or missing `href`. |
+| 4    | Required tool not available.      |
+
+## Examples
+
+``` bash
+# Prepend a base URL to a relative href
+halprepend.sh 'https://api.example.com' resource.json links self
+# → {"href":"https://api.example.com/api/r",...}
+
+# Work with an inline link object
+halprepend.sh 'https://api.example.com' --link '{"href":"/orders","title":"Orders"}'
+
+# Read the link from stdin
+echo '{"href":"/items"}' | halprepend.sh 'https://api.example.com' --link
+
+# Convert a server-relative href into an absolute URL before following it
+link=$(halprepend.sh 'https://api.example.com' resource.json links next)
+hallink.sh --link "$link" | jq -r .href | xargs GET
+```
+
 # HTTP client — `httpreq.sh`
 
 After activation, the HTTP method entry-points (`GET`, `POST`, `PUT`,
 `PATCH`, `OPTIONS`, `DELETE`) are on `PATH` and can be called directly.
 They are all hardlinks into a single underlying script.
 
-## Basic usage
+## Usage
 
 ``` bash
-GET  'https://api.example.com/orders/1'
-POST 'https://api.example.com/orders' -u 'product=widget' -u 'qty=3'
+GET  <url> [flags...]
+POST <url> [flags...]
+GET  --  [flags...]              # URL read from first stdin line
+GET  --link <json> [flags...]    # HAL link object: href → URL, type → Accept header
+GET  --link @<file> [flags...]   # HAL link from file
+GET  --link [flags...]           # HAL link from stdin
 ```
 
-The URL can also be read from stdin:
-
-``` bash
-echo 'https://api.example.com/orders/1' | GET
-printf 'https://api.example.com/orders\n' | POST -- -u 'product=widget'
-```
+`--link` extracts `href` as the request URL and, when the link object
+carries a `type` field, injects an `Accept: <type>` request header
+automatically.
 
 ## Output files
 
 Each invocation writes a group of files named
 `<domain>_<timestamp-ms>.*` in the current directory and prints the base
-name to stdout. This allows to pipe this script to other scripts like
-`cleanup.sh`, `rename.sh`, etc.
+name to stdout, allowing the result to be piped directly to `rename.sh`,
+`prettyprint.sh`, `cleanup.sh`, etc.
 
-| Extension  | Content                                                       |
-|------------|---------------------------------------------------------------|
-| `.curl`    | Shell-quoted `curl` command that exactly replays the request. |
-| `.code`    | The numeric value of the HTTP status code (e.g. `200`).       |
-| `.status`  | HTTP status code with name (e.g. `200 (OK)`).                 |
-| `.headers` | Response headers, one `Name: Value` pair per line.            |
-| `.cookies` | Response cookies, one `name=value` pair per line.             |
-| `.body`    | Raw response body.                                            |
+| Extension  | Content                                                                                                                                           |
+|------------|---------------------------------------------------------------------------------------------------------------------------------------------------|
+| `.url`     | The requested URL (no trailing newline).                                                                                                          |
+| `.curl`    | Shell-quoted `curl` command that exactly replays the request, formatted with one flag per continuation line for readability.                      |
+| `.code`    | The numeric HTTP status code (e.g. `200`).                                                                                                        |
+| `.status`  | HTTP status code with name (e.g. `200 (OK)`).                                                                                                     |
+| `.headers` | Response headers, one `Name: Value` pair per line (status line and `Set-Cookie` headers excluded; compatible with `HTTP_IN_HEADERS_FILE` format). |
+| `.cookies` | Response cookies extracted from `Set-Cookie` headers, one `name=value` per line (compatible with `HTTP_IN_COOKIES_FILE` format).                  |
+| `.body`    | Raw response body.                                                                                                                                |
 
 ## Request body flags
 
-| Flag            | Description                                                                                          |
-|-----------------|------------------------------------------------------------------------------------------------------|
-| `-a [text]`     | Plain-text or JSON body (`--data`). Omit text to read from stdin.                                    |
-| `-u [text]`     | URL-encoded body (`--data-urlencode`). Repeatable for multiple fields. Omit text to read from stdin. |
-| `-f [file]`     | Multipart file upload (`--form`). Repeatable. Omit file to read from stdin.                          |
-| `-b [file]`     | Binary body from file (`--data-binary @file`). Omit file to read from stdin.                         |
-| `-r [file]`     | Raw upload (`--upload-file`). Omit file to read from stdin.                                          |
-| `-F name=value` | Multipart text field (`--form name=value`). Repeatable for multiple fields.                          |
-| `-i`            | Include `-i` in the saved `.curl` replay file so the replay shows response headers.                  |
+| Flag             | Description                                                                                                                                                                                                    |
+|------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `-a [text]`      | Plain-text or JSON body (`--data`). Omit text to read from stdin.                                                                                                                                              |
+| `-u [text]`      | URL-encoded body (`--data-urlencode`). Repeatable for multiple fields. Omit text to read from stdin.                                                                                                           |
+| `-f [name=]file` | Multipart file upload (`--form name=@file`). `name` defaults to the file’s basename when omitted. Omit `file` entirely to send stdin as a raw binary body instead of multipart. Repeatable for multiple parts. |
+| `-F name=value`  | Multipart text field (`--form name=value`). Repeatable for multiple fields.                                                                                                                                    |
+| `-b [file]`      | Binary body from file (`--data-binary @file`). Omit file to read from stdin.                                                                                                                                   |
+| `-r [file]`      | Raw upload (`--upload-file`). Omit file to read from stdin.                                                                                                                                                    |
+| `-i`             | Include `-i` in the saved `.curl` replay file so the replay shows response headers.                                                                                                                            |
 
 ## Request headers and cookies
 
@@ -760,64 +942,6 @@ case "$action" in
 esac
 ```
 
-# `nahal.sh` — network-aware HAL browser
-
-An interactive browser that combines HTTP requests with HAL navigation.
-Starting from a URL or an existing HAL resource file, it follows links
-through the API, expands URI templates interactively, and records every
-request as a replayable shell script.
-
-## Usage
-
-``` bash
-nahal.sh <URL>
-nahal.sh <link-text>              # HAL link object supplied as inline JSON/YAML/XML
-nahal.sh <resource-file> [path…]  # start from a saved file; path locates the link
-```
-
-## Requirements
-
-- `curl`
-
-- `yq` (mikefarah/yq v4) or `jq` (JSON-only)
-
-- The HALDiSh HTTP method entry-points (`GET`, `POST`, …) on `PATH` —
-  provided after activation via `env.sh`.
-
-## Behaviour
-
-On each HTTP response `nahal.sh` inspects the `Content-Type` header and
-takes one of three actions:
-
-| Content-Type class                                                                                                               | Behaviour                                                                                            |
-|----------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------|
-| `application/hal+json`, `application/hal+xml`, `application/hal+yaml`, `application/json`, `application/xml`, `application/yaml` | Parse the body as a HAL resource and present the interactive link / embedded / properties navigator. |
-| `text/*`                                                                                                                         | Print the body to stdout for inspection; offer to re-parse as HAL.                                   |
-| Other (binary)                                                                                                                   | Open with the system default application.                                                            |
-
-Templated links (those with `"templated": true`) are expanded
-interactively: the browser prompts for each template variable and
-supports string, list, and map value types. For `POST`, `PUT`, and
-`PATCH` requests, the browser also prompts for a request body (inline
-text, file, URL-encoded, multipart, binary, or raw upload).
-
-## Session log
-
-Every session writes a file `<session-dir>/session.sh` containing the
-exact `curl` commands and `uritemplate.sh` expansions that were
-performed, in order. This script can be replayed later to reproduce the
-session without interaction.
-
-## stdin / stdout / exit codes
-
-| Channel | Content                                                                                 |
-|---------|-----------------------------------------------------------------------------------------|
-| stdin   | Not used directly (TTY is opened separately for interactive input).                     |
-| stdout  | Extracted values and printed bodies during navigation.                                  |
-| stderr  | Progress messages, menu display, prompts.                                               |
-| Exit 0  | User exited the browser normally.                                                       |
-| Exit 1  | Missing dependency (`curl`, `yq`/`jq`, method commands), or fatal error during startup. |
-
 # Examples module
 
 The repository contains a runnable examples module under `examples/`
@@ -894,6 +1018,9 @@ scripts and functions:
 | `uritemplate.bats` | RFC 6570 — all operators, prefix and explode modifiers, string / list / map variable types, percent-encoding, stdin template mode.                                                                   |
 | `menu.bats`        | `menu.sh` — all invocation modes, selection keys, pagination, invalid input retry, TTY simulation.                                                                                                   |
 | `hal.bats`         | `hal.sh` — format detection, non-interactive link / embedded / property extraction, interactive navigation.                                                                                          |
+| `hallink.bats`     | `hallink.sh` — `--link` and file+path modes, URI template expansion, basename resolution, format preservation (JSON/YAML/XML), exit code specificity.                                                |
+| `haldoclink.bats`  | `haldoclink.sh` — curie lookup at root and embedded levels, upward-stack search, unprefixed-rel suffix matching, deep nesting, basename resolution, format preservation, exit code specificity.      |
+| `halprepend.bats`  | `halprepend.sh` — `--link` and file+path modes, base concatenation, field preservation, basename resolution, format preservation (JSON/YAML/XML), exit code specificity.                             |
 | `adoc.bats`        | `adoc.sh` — file grouping, AsciiDoc region wrapping, stdin mode.                                                                                                                                     |
 | `rename.bats`      | `rename.sh` — base name handling, extension preservation, stdin mode.                                                                                                                                |
 | `cleanup.bats`     | `cleanup.sh` — deletion with and without keep-extension list, stdin mode.                                                                                                                            |
