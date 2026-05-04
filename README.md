@@ -508,8 +508,8 @@ work the same way via `HTTP_IN_COOKIES` / `HTTP_IN_COOKIES_FILE` (one
 `name=value` per line):
 
 ``` bash
-export HTTP_IN_HEADERS="Authorization: Bearer $TOKEN
-Accept: application/hal+json"
+export HTTP_IN_HEADERS="Authorization:Bearer $TOKEN
+Accept:application/hal+json"
 
 GET 'https://api.example.com/orders'
 ```
