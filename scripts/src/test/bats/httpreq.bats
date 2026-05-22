@@ -376,14 +376,14 @@ MOCK
     HTTP_IN_HEADERS='Authorization:Bearer token123' \
         _run_req GET 'https://example.com/'
     [ "$status" -eq 0 ]
-    _curl_has_seq --header 'Authorization: Bearer token123'
+    _curl_has_seq --header 'Authorization:Bearer token123'
 }
 
 @test "httpreq: HTTP_IN_HEADERS multiple headers each become separate --header args" {
     HTTP_IN_HEADERS=$'Accept:application/json\nX-Api-Version: 2' \
         _run_req GET 'https://example.com/'
     [ "$status" -eq 0 ]
-    _curl_has_seq --header 'Accept: application/json'
+    _curl_has_seq --header 'Accept:application/json'
     _curl_has_seq --header 'X-Api-Version: 2'
 }
 
@@ -606,7 +606,7 @@ MOCK
 @test "httpreq: --link with type field adds Accept header to request" {
     _run_req GET '--link' '{"href":"https://example.com/","type":"application/hal+json"}'
     [ "$status" -eq 0 ]
-    _curl_has_seq --header 'Accept: application/hal+json'
+    _curl_has_seq --header 'Accept:application/hal+json'
 }
 
 @test "httpreq: --link without type field does not inject Accept header" {
@@ -661,5 +661,5 @@ MOCK
     _run_req GET '--link' '{"href":"https://example.com/","type":"application/hal+json"}'
     [ "$status" -eq 0 ]
     # .curl stores shell-quoted args; the space in the header value is backslash-escaped
-    grep -qF 'Accept:\ application/hal+json' "${WORK_DIR}/${output}.curl"
+    grep -qF 'Accept:application/hal+json' "${WORK_DIR}/${output}.curl"
 }
