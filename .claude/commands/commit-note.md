@@ -18,4 +18,6 @@ Write a concise commit message following the style of recent commits:
 git log --oneline -5
 ```
 
+Do not list modified files, but explain logical changes in thous files.
+
 Output only the commit message text — no explanation, no code block wrapper.
