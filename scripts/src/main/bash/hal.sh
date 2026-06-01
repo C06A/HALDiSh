@@ -309,8 +309,15 @@ _to_jpath() {
             *)
                 if [[ "$seg" =~ ^[0-9]+$ ]]; then
                     jpath="${jpath}[${seg}]"
-                else
+                elif [[ "$seg" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
                     jpath="${jpath}.${seg}"
+                else
+                    # CURIE prefixes (rels with ':') and other non-identifier
+                    # keys need bracket-quote syntax — valid in both jq and yq.
+                    local esc="$seg"
+                    esc="${esc//\\/\\\\}"   # escape backslashes
+                    esc="${esc//\"/\\\"}"   # escape double quotes
+                    jpath="${jpath}[\"${esc}\"]"
                 fi
                 ;;
         esac

@@ -462,3 +462,101 @@ teardown() {
     [ "$status" -eq 4 ]
     rm -rf "$stub_dir"
 }
+
+# ── HAL_LINK_PLUGIN — plugin chain ────────────────────────────────────────────
+
+_make_plugin() {
+    local path="$1" new_href="$2"
+    printf '#!/usr/bin/env bash\njq -c --arg h "%s" '"'"'.href = $h'"'"' \n' "$new_href" > "$path"
+    chmod +x "$path"
+}
+
+@test "hallink.sh HAL_LINK_PLUGIN not set — no-op" {
+    run env -u HAL_LINK_PLUGIN bash "$HALLINK_SH" "${WORK_DIR}/res.json" links self
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"/api/r"* ]]
+}
+
+@test "hallink.sh HAL_LINK_PLUGIN single plugin rewrites href (file+path mode)" {
+    local plugin="${WORK_DIR}/plugin.sh"
+    printf '#!/usr/bin/env bash\njq -c '"'"'.href = "/rewritten"'"'"'\n' > "$plugin"
+    chmod +x "$plugin"
+    run env HAL_LINK_PLUGIN="$plugin" bash "$HALLINK_SH" "${WORK_DIR}/res.json" links self
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'"/rewritten"'* ]]
+}
+
+@test "hallink.sh HAL_LINK_PLUGIN plugin receives resource file and path args" {
+    local plugin="${WORK_DIR}/plugin.sh"
+    # Plugin writes its args to a file so we can inspect them, then passes link through
+    printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$@" > "%s/plugin_args"\ncat\n' \
+        "$WORK_DIR" > "$plugin"
+    chmod +x "$plugin"
+    run env HAL_LINK_PLUGIN="$plugin" bash "$HALLINK_SH" "${WORK_DIR}/res.json" links self
+    [ "$status" -eq 0 ]
+    local args
+    args=$(cat "${WORK_DIR}/plugin_args")
+    [[ "$args" == *"${WORK_DIR}/res.json"* ]]
+    [[ "$args" == *"links"* ]]
+    [[ "$args" == *"self"* ]]
+}
+
+@test "hallink.sh HAL_LINK_PLUGIN single plugin rewrites href (--link mode)" {
+    local plugin="${WORK_DIR}/plugin.sh"
+    printf '#!/usr/bin/env bash\njq -c '"'"'.href = "/link-mode-rewritten"'"'"'\n' > "$plugin"
+    chmod +x "$plugin"
+    run env HAL_LINK_PLUGIN="$plugin" bash "$HALLINK_SH" --link '{"href":"/api/r"}'
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'"/link-mode-rewritten"'* ]]
+}
+
+@test "hallink.sh HAL_LINK_PLUGIN --link mode calls plugin with no resource-file arg" {
+    local plugin="${WORK_DIR}/plugin.sh"
+    printf '#!/usr/bin/env bash\nprintf "%%d\\n" "$#" > "%s/plugin_argc"\ncat\n' \
+        "$WORK_DIR" > "$plugin"
+    chmod +x "$plugin"
+    run env HAL_LINK_PLUGIN="$plugin" bash "$HALLINK_SH" --link '{"href":"/api/r"}'
+    [ "$status" -eq 0 ]
+    [ "$(cat "${WORK_DIR}/plugin_argc")" -eq 0 ]
+}
+
+@test "hallink.sh HAL_LINK_PLUGIN two plugins chain in order" {
+    local p1="${WORK_DIR}/p1.sh" p2="${WORK_DIR}/p2.sh"
+    printf '#!/usr/bin/env bash\njq -c '"'"'.href = "/step1"'"'"'\n' > "$p1"; chmod +x "$p1"
+    printf '#!/usr/bin/env bash\njq -c '"'"'.href = (.href + "/step2")'"'"'\n' > "$p2"; chmod +x "$p2"
+    run env HAL_LINK_PLUGIN="${p1}:${p2}" bash "$HALLINK_SH" "${WORK_DIR}/res.json" links self
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'"/step1/step2"'* ]]
+}
+
+@test "hallink.sh HAL_LINK_PLUGIN plugin exits non-zero → exit 3" {
+    local plugin="${WORK_DIR}/plugin.sh"
+    printf '#!/usr/bin/env bash\nexit 1\n' > "$plugin"; chmod +x "$plugin"
+    run env HAL_LINK_PLUGIN="$plugin" bash "$HALLINK_SH" "${WORK_DIR}/res.json" links self
+    [ "$status" -eq 3 ]
+}
+
+@test "hallink.sh HAL_LINK_PLUGIN plugin emits invalid JSON → exit 3" {
+    local plugin="${WORK_DIR}/plugin.sh"
+    printf '#!/usr/bin/env bash\nprintf "not-json"\n' > "$plugin"; chmod +x "$plugin"
+    run env HAL_LINK_PLUGIN="$plugin" bash "$HALLINK_SH" "${WORK_DIR}/res.json" links self
+    [ "$status" -eq 3 ]
+}
+
+@test "hallink.sh HAL_LINK_PLUGIN plugin output missing .href → exit 3" {
+    local plugin="${WORK_DIR}/plugin.sh"
+    printf '#!/usr/bin/env bash\nprintf '"'"'{"title":"no href"}'"'"'\n' > "$plugin"; chmod +x "$plugin"
+    run env HAL_LINK_PLUGIN="$plugin" bash "$HALLINK_SH" "${WORK_DIR}/res.json" links self
+    [ "$status" -eq 3 ]
+}
+
+@test "hallink.sh HAL_LINK_PLUGIN plugin fires before template expansion" {
+    local plugin="${WORK_DIR}/plugin.sh"
+    # Rewrite href to a non-templated value; if plugin fires before expansion,
+    # no template expansion will occur and output will contain our literal href.
+    printf '#!/usr/bin/env bash\njq -c '"'"'.href = "/plugin-href" | del(.templated)'"'"'\n' \
+        > "$plugin"; chmod +x "$plugin"
+    run env HAL_LINK_PLUGIN="$plugin" bash "$HALLINK_SH" "${WORK_DIR}/res.json" links tmpl
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'"/plugin-href"'* ]]
+}

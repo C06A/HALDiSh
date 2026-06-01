@@ -491,6 +491,16 @@ _brow_accept_for_link() {
 
 # ── link following ────────────────────────────────────────────────────────────
 
+# _brow_rel_filter <rel>  → jq/yq filter for a link's href: ._links["<rel>"].href
+# Bracket-quote syntax is valid in both jq and mikefarah yq and safely handles
+# CURIE prefixes (rels containing ':') and any other non-identifier characters.
+_brow_rel_filter() {
+    local rel="$1"
+    rel="${rel//\\/\\\\}"   # escape backslashes
+    rel="${rel//\"/\\\"}"   # escape double quotes
+    printf '._links[%s].href' "\"${rel}\""
+}
+
 # _brow_follow_link <link_json> <rel>
 # Sends request, handles response.  Returns 0 if navigated into new HAL
 # resource (recursive call completed), 1 if non-HAL (stay on current resource).
@@ -498,9 +508,20 @@ _brow_follow_link() {
     local link_json="$1" rel="$2"
 
     local href templated accept url
-    href=$(_brow_qkr "$link_json" '.href')
-    templated=$(_brow_qr  "$link_json" '.templated // false')
     accept=$(_brow_accept_for_link "$link_json")
+
+    if [[ -n "${HAL_LINK_PLUGIN:-}" ]]; then
+        local _resource_file=''
+        [[ -n "${_BROW_LAST_BASE:-}" ]] && _resource_file="${_BROW_OUTDIR}/${_BROW_LAST_BASE}.body"
+        link_json=$(_hal_run_plugins "$link_json" \
+            ${_resource_file:+"$_resource_file"} \
+            "${_BROW_NAV_PATH[@]+"${_BROW_NAV_PATH[@]}"}" \
+            "links" "$rel") \
+            || { hal::log::error "plugin failed — aborting navigation"; return 1; }
+    fi
+
+    href=$(_brow_qkr "$link_json" 'href')
+    templated=$(_brow_qr  "$link_json" '.templated // false')
 
     _brow_log_comment "Step ${_BROW_STEP}: follow link '${rel}'"
 
@@ -510,7 +531,7 @@ _brow_follow_link() {
         if [[ -n "$_BROW_LAST_BASE" ]]; then
             printf '_template=$(%s -r %s %s)\n' \
                 "$_BROW_TOOL" \
-                "$(printf '%q' "._links.${rel}.href")" \
+                "$(printf '%q' "$(_brow_rel_filter "$rel")")" \
                 "$(printf '%q' "${_BROW_LAST_BASE}.body")" >> "$_BROW_LOG"
         else
             printf '_template=%s\n' "$(printf '%q' "$href")" >> "$_BROW_LOG"
@@ -520,7 +541,7 @@ _brow_follow_link() {
         if [[ -n "$_BROW_LAST_BASE" ]]; then
             printf '_link=$(%s -r %s %s)\n' \
                 "$_BROW_TOOL" \
-                "$(printf '%q' "._links.${rel}.href")" \
+                "$(printf '%q' "$(_brow_rel_filter "$rel")")" \
                 "$(printf '%q' "${_BROW_LAST_BASE}.body")" >> "$_BROW_LOG"
         else
             printf '_link=%s\n' "$(printf '%q' "$href")" >> "$_BROW_LOG"
@@ -617,8 +638,11 @@ _brow_handle_binary() {
 
 # _brow_navigate_response <body-file> <url> <is_top>
 # Loads body file, detects format, converts to JSON, calls _brow_navigate_resource.
+_BROW_NAV_PATH=()
+
 _brow_navigate_response() {
     local body_file="$1" url="$2" is_top="$3"
+    _BROW_NAV_PATH=()
     local body fmt json
     body=$(cat "$body_file")
     fmt=$(_brow_detect_format "$body")
@@ -760,6 +784,8 @@ _brow_nav_embedded() {
         item=$(_brow_qk "$embedded" "$chosen")
         itype=$(_brow_qtype "$item")
 
+        local _saved_path=("${_BROW_NAV_PATH[@]+"${_BROW_NAV_PATH[@]}"}")
+
         if [[ "$itype" == "array" ]]; then
             local count idx
             count=$(_brow_qr "$item" 'length')
@@ -774,10 +800,13 @@ _brow_nav_embedded() {
             done
             local elem
             elem=$(_brow_qi "$item" "$(( idx - 1 ))")
-            _brow_navigate_resource "$elem" "(embedded ${chosen}[${idx_choice}])" "0"
+            _BROW_NAV_PATH=("${_saved_path[@]+"${_saved_path[@]}"}" "embeddeds" "$chosen" "$(( idx - 1 ))")
+            _brow_navigate_resource "$elem" "(embedded ${chosen}[${idx}])" "0"
         else
+            _BROW_NAV_PATH=("${_saved_path[@]+"${_saved_path[@]}"}" "embeddeds" "$chosen")
             _brow_navigate_resource "$item" "(embedded ${chosen})" "0"
         fi
+        _BROW_NAV_PATH=("${_saved_path[@]+"${_saved_path[@]}"}")
     done
 }
 
@@ -892,8 +921,10 @@ _brow_resolve_start() {
         fi
         link_fmt=$(_brow_detect_format "$link_raw")
         link_json=$(_brow_to_json "$link_raw" "$link_fmt")
+        link_json=$(_hal_run_plugins "$link_json" "$first" "$@") \
+            || { printf 'nahal: plugin failed on start link\n' >&2; exit 1; }
         _BROW_START_LINK_JSON="$link_json"
-        _BROW_START_URL=$(_brow_qkr "$link_json" '.href')
+        _BROW_START_URL=$(_brow_qkr "$link_json" 'href')
         if [[ -z "$_BROW_START_URL" || "$_BROW_START_URL" == "null" ]]; then
             printf 'nahal: extracted path does not contain a link with .href\n' >&2; exit 1
         fi
@@ -903,7 +934,7 @@ _brow_resolve_start() {
         fmt=$(_brow_detect_format "$first")
         json=$(_brow_to_json "$first" "$fmt")
         _BROW_START_LINK_JSON="$json"
-        _BROW_START_URL=$(_brow_qkr "$json" '.href')
+        _BROW_START_URL=$(_brow_qkr "$json" 'href')
         if [[ -z "$_BROW_START_URL" || "$_BROW_START_URL" == "null" ]]; then
             printf 'nahal: link has no .href field\n' >&2; exit 1
         fi

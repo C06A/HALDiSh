@@ -212,6 +212,7 @@ if [[ "$_mode" == link ]]; then
         _hallink_detect_str "$_raw"
     fi
     _link_obj=$(_hallink_to_json "$_raw")
+    _link_obj=$(_hal_run_plugins "$_link_obj") || exit 3
 
 # ── Mode B: file + path ─────────────────────────────────────────────────────────
 
@@ -235,6 +236,7 @@ else
     if [[ "$_link_obj" == "null" || -z "$_link_obj" ]]; then
         printf 'hallink: link not found: %s\n' "${_path[*]}" >&2; exit 3
     fi
+    _link_obj=$(_hal_run_plugins "$_link_obj" "$_file" "${_path[@]}") || exit 3
 fi
 
 # ── Expand href ────────────────────────────────────────────────────────────────

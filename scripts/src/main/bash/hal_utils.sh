@@ -209,3 +209,42 @@ hal::log::die() {
     printf "${_HAL_RED}[ERR ]${_HAL_RST}  %s\n" "$1" >&2
     exit "${2:-1}"
 }
+
+# ── hal::plugin ───────────────────────────────────────────────────────────────
+
+# _hal_run_plugins <link_json> [resource-file] [path…]
+# Pipes link_json through each colon-separated script in HAL_LINK_PLUGIN in order.
+# Each plugin: receives current link JSON on stdin, resource-file + path as args,
+# must print updated link JSON (with .href) to stdout.
+# No-op when HAL_LINK_PLUGIN is unset or empty.
+# Prints error to stderr and returns 1 on plugin failure or invalid output.
+_hal_run_plugins() {
+    local _current="$1"; shift
+    if [[ -z "${HAL_LINK_PLUGIN:-}" ]]; then
+        printf '%s' "$_current"
+        return 0
+    fi
+    local -a _plugins
+    IFS=: read -ra _plugins <<< "$HAL_LINK_PLUGIN"
+    local _p _out
+    for _p in "${_plugins[@]}"; do
+        [[ -z "$_p" ]] && continue
+        if ! _out=$(printf '%s' "$_current" | "$_p" "$@"); then
+            printf 'hal: plugin failed: %s\n' "$_p" >&2
+            return 1
+        fi
+        _current="$_out"
+    done
+    local _href=''
+    if command -v jq >/dev/null 2>&1; then
+        _href=$(printf '%s' "$_current" | jq -r '.href // empty' 2>/dev/null) || true
+    elif command -v yq >/dev/null 2>&1 && printf '{}' | yq '.' >/dev/null 2>&1; then
+        _href=$(printf '%s' "$_current" | yq -r '.href // ""' 2>/dev/null) || true
+    else
+        printf 'hal: plugin validation requires jq or yq\n' >&2; return 1
+    fi
+    if [[ -z "$_href" || "$_href" == "null" ]]; then
+        printf 'hal: plugin output missing .href\n' >&2; return 1
+    fi
+    printf '%s' "$_current"
+}
