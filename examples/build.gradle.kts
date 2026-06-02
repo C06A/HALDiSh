@@ -9,7 +9,7 @@ repositories {
 }
 
 dependencies {
-    haldish("com.helpchoice:haldish:2.4.0@run")
+    haldish("com.helpchoice:haldish:2.4.1@run")
 }
 
 tasks.register("setup") {
