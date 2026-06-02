@@ -14,6 +14,12 @@ set -euo pipefail
 _HAL_TOOL=""
 _HAL_FORMAT=""
 
+# Prefix for menu items that are navigation/UI controls (return, quit, print,
+# exit) rather than data from the HAL document.  menu.sh renders these in a
+# distinct color with a ">>> " marker and strips the prefix from the value it
+# returns.
+readonly _HAL_NAV=$'\001'
+
 # _detect_format — probe file content with available parsers; no extension or
 # filename heuristics.  Sets _HAL_FORMAT to: json | xml | yaml | unknown.
 _detect_format() {
@@ -371,8 +377,8 @@ _interactive_value() {
             _show_path "$path"
             local opts=()
             while IFS= read -r k; do opts+=("$k"); done <<< "$keys"
-            opts+=("print" "return")
-            [[ "$is_top" == "1" ]] && opts+=("quit")
+            opts+=("${_HAL_NAV}print" "${_HAL_NAV}return")
+            [[ "$is_top" == "1" ]] && opts+=("${_HAL_NAV}quit")
             local chosen
             chosen=$(printf '%s\n' "${opts[@]}" | menu.sh "Value")
             case "$chosen" in
@@ -401,7 +407,7 @@ _interactive_link_detail() {
         _show_path "$path"
         local opts=()
         while IFS= read -r f; do opts+=("$f"); done <<< "$fields"
-        opts+=("print" "return" "quit")
+        opts+=("${_HAL_NAV}print" "${_HAL_NAV}return" "${_HAL_NAV}quit")
         local chosen
         chosen=$(printf '%s\n' "${opts[@]}" | menu.sh "Link field")
         case "$chosen" in
@@ -445,7 +451,7 @@ _interactive_links() {
             [[ "$templated" == "true" ]] && suffix=" {T}"
             opts+=("${rel}${suffix}")
         done <<< "$rels"
-        opts+=("return")
+        opts+=("${_HAL_NAV}return")
         local chosen
         chosen=$(printf '%s\n' "${opts[@]}" | menu.sh "Link rel")
         [[ "$chosen" == "return" ]] && return 0
@@ -481,7 +487,7 @@ _interactive_embeddeds() {
         _show_path "$path embeddeds"
         local opts=()
         while IFS= read -r rel; do opts+=("$rel"); done <<< "$rels"
-        opts+=("return")
+        opts+=("${_HAL_NAV}return")
         local chosen
         chosen=$(printf '%s\n' "${opts[@]}" | menu.sh "Embedded rel")
         [[ "$chosen" == "return" ]] && return 0
@@ -515,7 +521,7 @@ _interactive_properties() {
         _show_path "$path properties"
         local opts=()
         while IFS= read -r k; do opts+=("$k"); done <<< "$keys"
-        opts+=("return" "quit")
+        opts+=("${_HAL_NAV}return" "${_HAL_NAV}quit")
         local chosen
         chosen=$(printf '%s\n' "${opts[@]}" | menu.sh "Property")
         [[ "$chosen" == "return" ]] && return 0
@@ -638,7 +644,7 @@ _interactive_docs() {
     fi
     while true; do
         _show_path "$path docs"
-        local opts=("${curi_rels[@]}" "return")
+        local opts=("${curi_rels[@]}" "${_HAL_NAV}return")
         local chosen
         chosen=$(printf '%s\n' "${opts[@]}" | menu.sh "Docs rel")
         [[ "$chosen" == "return" ]] && return 0
@@ -668,11 +674,11 @@ _interactive_resource() {
         [[ "$has_embedded" == "true" ]] && opts+=("embeddeds")
         [[ "$has_props"    == "true" ]] && opts+=("properties")
         [[ "$has_docs"     == "true" ]] && opts+=("docs")
-        opts+=("print")
+        opts+=("${_HAL_NAV}print")
         if [[ "$is_top" == "1" ]]; then
-            opts+=("exit")
+            opts+=("${_HAL_NAV}exit")
         else
-            opts+=("return" "quit")
+            opts+=("${_HAL_NAV}return" "${_HAL_NAV}quit")
         fi
         local chosen
         chosen=$(printf '%s\n' "${opts[@]}" | menu.sh "Resource")

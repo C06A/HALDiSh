@@ -13,6 +13,32 @@ readonly _MENU_SELECTORS='123456789abcdefghijklmnopqrstuvwxyz'
 readonly _MENU_MAX_PER_PAGE=30
 readonly _MENU_PAGINATE_THRESHOLD=36
 
+# An option whose text starts with this byte is a navigation/meta item (back,
+# quit, …) rather than data from the resource being browsed.  The marker is
+# stripped before display and before the chosen value is returned; the label is
+# rendered in a distinct color so it stands out from content options.
+readonly _MENU_META_MARK=$'\001'
+if [[ -t 2 && -z "${NO_COLOR:-}" ]]; then
+    readonly _MENU_META_COLOR=$'\033[36m'   # cyan
+    readonly _MENU_META_RESET=$'\033[0m'
+else
+    readonly _MENU_META_COLOR=''
+    readonly _MENU_META_RESET=''
+fi
+
+# _menu_render_row <selector> <option-text>
+# Prints one menu row to stderr, coloring it if it is a meta item.
+_menu_render_row() {
+    local sel="$1" opt="$2"
+    if [[ "${opt:0:1}" == "$_MENU_META_MARK" ]]; then
+        # ">>> " prefix marks meta items independently of color, for terminals
+        # without color support or users who can't distinguish the cyan.
+        printf '(%s) %s>>> %s%s\n' "$sel" "$_MENU_META_COLOR" "${opt:1}" "$_MENU_META_RESET" >&2
+    else
+        printf '(%s) %s\n' "$sel" "$opt" >&2
+    fi
+}
+
 # ── parse arguments / stdin ──────────────────────────────────────────────────
 
 _menu_read_options_from_stdin() {
@@ -54,6 +80,10 @@ fi
 # (_MENU_TTY overrides /dev/tty in tests.)
 exec 3< "${_MENU_TTY:-/dev/tty}"
 
+# Blank line separates the menu from whatever preceded it (prior log, response
+# body, previous menu echo) so the option list is visually distinct.
+printf '\n' >&2
+
 while true; do
     # Determine visible slice
     if [[ $_menu_paginate -eq 1 ]]; then
@@ -74,11 +104,12 @@ while true; do
     # Print option rows
     for (( _i = _menu_start; _i < _menu_end; _i++ )); do
         _sel="${_MENU_SELECTORS:$(( _i - _menu_start )):1}"
-        printf '(%s) %s\n' "$_sel" "${_menu_options[$_i]}" >&2
+        _menu_render_row "$_sel" "${_menu_options[$_i]}"
     done
 
-    if [[ $_menu_has_prev -eq 1 ]]; then printf '(<) Previous\n' >&2; fi
-    if [[ $_menu_has_next -eq 1 ]]; then printf '(>) Next\n'     >&2; fi
+    # Pagination controls are navigation, so color them like meta items.
+    if [[ $_menu_has_prev -eq 1 ]]; then _menu_render_row '<' "${_MENU_META_MARK}Previous"; fi
+    if [[ $_menu_has_next -eq 1 ]]; then _menu_render_row '>' "${_MENU_META_MARK}Next";     fi
 
     # Build selector range for the prompt suffix  [first-last]
     _menu_first="${_MENU_SELECTORS:0:1}"
@@ -120,8 +151,14 @@ while true; do
     done
 
     if (( _menu_matched >= 0 )); then
-        printf '%s\n' "${_menu_options[$_menu_matched]}" >&2  # chosen option → stderr
-        printf '%s\n' "${_menu_options[$_menu_matched]}"       # chosen option → stdout
+        _menu_chosen_opt="${_menu_options[$_menu_matched]}"
+        if [[ "${_menu_chosen_opt:0:1}" == "$_MENU_META_MARK" ]]; then
+            _menu_chosen_opt="${_menu_chosen_opt:1}"             # drop meta marker
+            printf '%s>>> %s%s\n' "$_MENU_META_COLOR" "$_menu_chosen_opt" "$_MENU_META_RESET" >&2
+        else
+            printf '%s\n' "$_menu_chosen_opt" >&2               # chosen option → stderr
+        fi
+        printf '%s\n' "$_menu_chosen_opt"                        # chosen option → stdout
         exit 0
     fi
 

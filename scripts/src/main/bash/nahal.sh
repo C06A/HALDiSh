@@ -31,6 +31,11 @@ source "${_SCRIPT_DIR}/env.sh" 2>/dev/null || \
 
 readonly _BROW_HAL_ACCEPT='application/hal+json, application/hal+xml;q=0.9, application/hal+yaml;q=0.8, application/json;q=0.7, application/xml;q=0.6, application/yaml;q=0.5'
 
+# Prefix for menu items that are navigation/UI controls (back, quit, print, …)
+# rather than data from the HAL resource.  menu.sh renders these in a distinct
+# color and strips the marker from the value it returns.
+readonly _BROW_NAV=$'\001'
+
 # ── session state ─────────────────────────────────────────────────────────────
 
 _BROW_TOOL=''        # yq or jq
@@ -325,7 +330,7 @@ _brow_expand_vars() {
 
     # Top-level variable selection loop
     while true; do
-        local opts=("Continue") v
+        local opts=("${_BROW_NAV}Continue") v
         for v in "${vars[@]}"; do
             opts+=("$(_tpl_summary "$v")")
         done
@@ -345,7 +350,7 @@ _brow_expand_vars() {
             "Add list item" \
             "Add map entry (key=value)" \
             "Clear" \
-            "Back" \
+            "${_BROW_NAV}Back" \
             | menu.sh "${vname}")
 
         local inp
@@ -596,7 +601,7 @@ _brow_handle_text() {
     choice=$(printf '%s\n' \
         "Print content" \
         "Parse as HAL resource" \
-        "Continue from previous resource" \
+        "${_BROW_NAV}Continue from previous resource" \
         | menu.sh "Text response")
 
     case "$choice" in
@@ -620,7 +625,7 @@ _brow_handle_binary() {
     local choice
     choice=$(printf '%s\n' \
         "Open with system application" \
-        "Continue from previous resource" \
+        "${_BROW_NAV}Continue from previous resource" \
         | menu.sh "Binary response")
 
     if [[ "$choice" == "Open with system application" ]]; then
@@ -667,12 +672,12 @@ _brow_navigate_resource() {
         [[ "$has_links"    == "true" ]] && opts+=("links")
         [[ "$has_embedded" == "true" ]] && opts+=("embedded")
         [[ "$has_props"    == "true" ]] && opts+=("properties")
-        opts+=("print resource")
+        opts+=("${_BROW_NAV}print resource")
         if [[ "$is_top" == "1" ]]; then
-            opts+=("quit")
+            opts+=("${_BROW_NAV}quit")
         else
-            opts+=("back")
-            opts+=("quit")
+            opts+=("${_BROW_NAV}back")
+            opts+=("${_BROW_NAV}quit")
         fi
 
         local chosen
@@ -697,7 +702,7 @@ _brow_nav_links() {
     rels=$(_brow_qr  "$links" 'keys[]')
 
     while true; do
-        local opts=("back")
+        local opts=("${_BROW_NAV}back")
         while IFS= read -r rel; do
             local lobj ltype templated suffix=''
             lobj=$(_brow_qk "$links" "$rel")
@@ -723,7 +728,7 @@ _brow_nav_links() {
         # If link is an array, let user pick which one
         local link_obj
         if [[ "$ltype" == "array" ]]; then
-            local count i idx_opts=("back")
+            local count i idx_opts=("${_BROW_NAV}back")
             count=$(_brow_qr "$lobj" 'length')
             for (( i = 0; i < count; i++ )); do
                 local lhref lname entry
@@ -745,23 +750,29 @@ _brow_nav_links() {
             link_obj="$lobj"
         fi
 
-        # Show href and offer action
+        # Show href, then loop on the action menu so "show link details" keeps
+        # offering actions for the same link instead of dropping back to the list.
         local href
         href=$(_brow_qkr "$link_obj" 'href')
-        printf '\n  %s → %s\n' "$rel" "$href" >&2
+        while true; do
+            printf '\n  %s → %s\n' "$rel" "$href" >&2
 
-        local action
-        action=$(printf '%s\n' \
-            "follow (send request)" \
-            "show link details" \
-            "back" \
-            | menu.sh "Action")
+            local action
+            action=$(printf '%s\n' \
+                "follow (send request)" \
+                "show link details" \
+                "${_BROW_NAV}back" \
+                | menu.sh "Action")
 
-        case "$action" in
-            "follow (send request)") _brow_follow_link "$link_obj" "$rel" ;;
-            "show link details")     _brow_pretty "$link_obj" ;;
-            back)                    continue ;;
-        esac
+            case "$action" in
+                # `|| true`: a non-HAL response makes _brow_follow_link return 1 as
+                # a "stay on current resource" signal — not an error. Without this,
+                # `set -e` would treat the failed case arm as fatal and exit.
+                "follow (send request)") _brow_follow_link "$link_obj" "$rel" || true; break ;;
+                "show link details")     _brow_pretty "$link_obj" ;;
+                back)                    break ;;
+            esac
+        done
     done
 }
 
@@ -773,7 +784,7 @@ _brow_nav_embedded() {
     rels=$(_brow_qr "$embedded" 'keys[]')
 
     while true; do
-        local opts=("back")
+        local opts=("${_BROW_NAV}back")
         while IFS= read -r rel; do opts+=("$rel"); done <<< "$rels"
 
         local chosen
@@ -828,7 +839,7 @@ _brow_nav_value() {
             local keys
             keys=$(_brow_qr "$val" 'keys[]')
             while true; do
-                local opts=("print" "back")
+                local opts=("${_BROW_NAV}print" "${_BROW_NAV}back")
                 while IFS= read -r k; do opts+=("$k"); done <<< "$keys"
                 local chosen
                 chosen=$(printf '%s\n' "${opts[@]}" | menu.sh "${label}")
@@ -871,7 +882,7 @@ _brow_nav_properties() {
     keys=$(_brow_qr "$props" 'keys[]')
 
     while true; do
-        local opts=("back")
+        local opts=("${_BROW_NAV}back")
         while IFS= read -r k; do opts+=("$k"); done <<< "$keys"
 
         local chosen

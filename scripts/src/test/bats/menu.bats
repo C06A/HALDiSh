@@ -186,14 +186,14 @@ _make_options() {
     _make_options 36 opts
     _type '1'
     run --separate-stderr bash "$MENU_SH" "Pick" "${opts[@]}"
-    [[ "$stderr" != *"(>) Next"* ]]
+    [[ "$stderr" != *"(>) >>> Next"* ]]
 }
 
 @test "menu.sh paginates when options exceed 36" {
     _make_options 37 opts
     _type '1'
     run --separate-stderr bash "$MENU_SH" "Pick" "${opts[@]}"
-    [[ "$stderr" == *"(>) Next"* ]]
+    [[ "$stderr" == *"(>) >>> Next"* ]]
 }
 
 # ── pagination display ────────────────────────────────────────────────────────
@@ -211,7 +211,7 @@ _make_options() {
     _make_options 37 opts
     _type '1'
     run --separate-stderr bash "$MENU_SH" "Pick" "${opts[@]}"
-    [[ "$stderr" != *"(<) Previous"* ]]
+    [[ "$stderr" != *"(<) >>> Previous"* ]]
 }
 
 @test "menu.sh includes next-page hint in prompt range on first page" {
@@ -235,7 +235,7 @@ _make_options() {
     _make_options 37 opts
     _type '>' '1'
     run --separate-stderr bash "$MENU_SH" "Pick" "${opts[@]}"
-    [[ "$stderr" == *"(<) Previous"* ]]
+    [[ "$stderr" == *"(<) >>> Previous"* ]]
 }
 
 @test "menu.sh navigates back to previous page with '<'" {
