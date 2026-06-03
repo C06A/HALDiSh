@@ -237,7 +237,7 @@ tasks.register("publishToMavenCentral") {
         val groupPath   = groupId.replace('.', '/')
         val localRepo   = file("${System.getProperty("user.home")}/.m2/repository")
         val stagingDir  = localRepo.resolve("$groupPath/$artifactId/$ver")
-        val bundleZip   = buildBase.resolve("central-bundle.zip")
+        val bundleZip   = buildBase.resolve("HALDiSh.zip")
 
         if (!stagingDir.exists()) {
             throw GradleException("Staging directory not found: $stagingDir\nRun publishRunArchivePublicationToMavenLocal first.")

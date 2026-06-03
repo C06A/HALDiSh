@@ -22,7 +22,7 @@
 # =============================================================================
 set -euo pipefail
 
-_SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 PATH="${_SCRIPT_DIR}:${PATH}"
 source "${_SCRIPT_DIR}/env.sh" 2>/dev/null || \
     source "${_SCRIPT_DIR}/hal_utils.sh" 2>/dev/null || true
@@ -953,6 +953,9 @@ _brow_resolve_start() {
 }
 
 # ── main ──────────────────────────────────────────────────────────────────────
+# Guard so the file can be sourced (e.g. by the test suite) to exercise the
+# helper functions in isolation without launching an interactive session.
+if [[ "${BASH_SOURCE[0]:-}" == "${0}" ]]; then
 
 [[ $# -lt 1 ]] && { _brow_usage; exit 1; }
 
@@ -1020,3 +1023,5 @@ case "$_brow_cls" in
 esac
 
 hal::log::ok "Session ended.  Log: ${_BROW_LOG}"
+
+fi   # end main guard
