@@ -3,8 +3,13 @@
 # rename.sh — rename a group of files that share a base name across extensions
 #
 # Usage:
-#   rename.sh <new-name> <old-name>
-#   rename.sh <new-name>              # old-name read from stdin
+#   rename.sh <new-name> [old-name]      # old-name read from stdin if omitted
+#   rename.sh -p <prefix> [old-name]     # new-name = <prefix><next number>
+#
+# In -p mode the new base name is <prefix> followed by one more than the largest
+# integer N among existing <prefix>N.* files in the current directory (1 when
+# none exist), so repeated runs keep appending without collisions.  An empty
+# prefix yields bare numbers (1.*, 2.*, …).
 #
 # Finds all files matching <old-name>.* in the current directory and renames
 # them to <new-name>.<same-ext>.
@@ -15,7 +20,8 @@ set -euo pipefail
 
 _usage() {
     printf 'Usage: %s <new-name> [old-name]\n' "$(basename "$0")" >&2
-    printf '       echo old-name | %s <new-name>\n' "$(basename "$0")" >&2
+    printf '       %s -p <prefix> [old-name]\n' "$(basename "$0")" >&2
+    printf '       echo old-name | %s <new-name>|-p <prefix>\n' "$(basename "$0")" >&2
 }
 
 if [[ $# -lt 1 ]]; then
@@ -24,10 +30,33 @@ fi
 
 . hal_utils.sh
 
-new_name="$1"
+# Resolve the new base name (explicit, or auto-numbered from a prefix).
+new_name=""
+if [[ "$1" == "-p" ]]; then
+    [[ $# -ge 2 ]] || { _usage; exit 1; }
+    prefix="$2"
+    shift 2
+    # Next number = (largest N among existing <prefix>N.* files) + 1.  Matching
+    # is literal on the prefix (no glob surprises) and only a purely-numeric
+    # suffix counts, so unrelated files are ignored.
+    max=0
+    shopt -s nullglob
+    for f in *; do
+        [[ "$f" == "${prefix}"* ]] || continue
+        rest="${f#"$prefix"}"
+        num="${rest%%.*}"
+        [[ "$num" =~ ^[0-9]+$ ]] || continue
+        (( 10#$num > max )) && max=$(( 10#$num ))
+    done
+    new_name="${prefix}$(( max + 1 ))"
+else
+    new_name="$1"
+    shift
+fi
 
-if [[ $# -ge 2 ]]; then
-    old_name="$2"
+# Resolve the old base name (positional argument or stdin).
+if [[ $# -ge 1 ]]; then
+    old_name="$1"
 elif [[ ! -t 0 ]]; then
     IFS= read -r old_name
 else

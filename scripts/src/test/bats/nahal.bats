@@ -69,7 +69,8 @@ teardown() {
     rm -rf "$WORK_DIR" "$STUB_DIR"
 }
 
-_type_key() { printf '%s' "$@" >&9; }
+_type_key()  { printf '%s'   "$@" >&9; }   # menu.sh keystrokes (no newline)
+_type_line() { printf '%s\n' "$@" >&9; }   # _brow_prompt line input (newline)
 
 # _src '<bash using nahal helpers>' [args...]
 # Sources nahal.sh (guard skips main), initialises the JSON tool, then evals the
@@ -460,19 +461,23 @@ _src() {
     rm -rf "$d"
 }
 
-@test "_brow_log_step: a custom method emits _ensure_method and ./<NAME>" {
+@test "_brow_log_step: custom method, inline header, array capture, prefix rename" {
     run bash -c '
         source "$1" >/dev/null 2>&1 || true
-        _BROW_LOG="$2"; _BROW_STEP=3
-        _brow_log_step "Accept:x" "./HEAD" \
-            "hallink.sh step_2.body links self | ./HEAD --link" "follow"
-        _brow_log_finalize
+        _BROW_LOG="$2"; _BROW_STEP=3; _BROW_PREFIX=req
+        : > "$2"
+        cmd="hallink.sh \"\${_b[2]}.body\" links self
+./HEAD --link"
+        _brow_log_step "Accept:x" "./HEAD" "$cmd" "follow"
         cat "$2"
     ' _ "$NAHAL_SH" "${WORK_DIR}/log"
     [[ "$output" == *"_ensure_method HEAD"* ]]
+    [[ "$output" == *'_b[3]=$('* ]]
+    [[ "$output" == *'HTTP_IN_HEADERS="Accept:x'* ]]
     [[ "$output" == *"./HEAD --link"* ]]
-    [[ "$output" == *"| rename.sh step_3"* ]]
-    [[ "$output" == *'(HTTP_IN_HEADERS="Accept:x'* ]]
+    [[ "$output" == *"rename.sh -p req"* ]]
+    [[ "$output" == *'${_b[2]}.body'* ]]
+    [[ "$output" != *"(HTTP_IN_HEADERS"* ]]
 }
 
 # ── documentation (CURIE) ─────────────────────────────────────────────────────
@@ -505,7 +510,7 @@ CURI_RES='{"_links":{"self":{"href":"/r"},"curies":[{"name":"ex","href":"https:/
 @test "interactive: GET a HAL resource then quit" {
     # Resource menu (top-level): links(1) properties(2) print resource(3) quit(4)
     _type_key '4'
-    run --separate-stderr bash -c 'cd "$2" && bash "$1" http://example.com/api' \
+    run --separate-stderr bash -c 'cd "$2" && bash "$1" -p step_ http://example.com/api' \
         _ "$NAHAL_SH" "$WORK_DIR"
     [ "$status" -eq 0 ]
     [[ "$stderr" == *"example.com"* ]]
@@ -520,7 +525,7 @@ CURI_RES='{"_links":{"self":{"href":"/r"},"curies":[{"name":"ex","href":"https:/
     _type_key '3'   # back           → back to links list
     _type_key '1'   # back           → back to resource
     _type_key '4'   # quit
-    run --separate-stderr bash -c 'cd "$2" && bash "$1" http://example.com/api' \
+    run --separate-stderr bash -c 'cd "$2" && bash "$1" -p step_ http://example.com/api' \
         _ "$NAHAL_SH" "$WORK_DIR"
     [ "$status" -eq 0 ]
     [[ "$stderr" == *"/api/r"* ]]
@@ -530,7 +535,7 @@ CURI_RES='{"_links":{"self":{"href":"/r"},"curies":[{"name":"ex","href":"https:/
     export MOCK_BODY='[{"_links":{"self":{"href":"/api/a"}},"n":1},{"_links":{"self":{"href":"/api/b"}},"n":2}]'
     _type_key '1'   # element 1   (array menu: 1:/api/a(1) 2:/api/b(2) print(3) quit(4))
     _type_key '5'   # quit        (element resource: links(1) properties(2) print(3) back(4) quit(5))
-    run --separate-stderr bash -c 'cd "$2" && bash "$1" http://example.com/api' \
+    run --separate-stderr bash -c 'cd "$2" && bash "$1" -p step_ http://example.com/api' \
         _ "$NAHAL_SH" "$WORK_DIR"
     [ "$status" -eq 0 ]
     [[ "$stderr" == *"array of 2"* ]]
@@ -547,7 +552,7 @@ CURI_RES='{"_links":{"self":{"href":"/r"},"curies":[{"name":"ex","href":"https:/
     _type_key '2'   # ex:widget   (docs menu: back(1) ex:widget(2))
     _type_key '1'   # back
     _type_key '5'   # quit
-    run --separate-stderr bash -c 'cd "$2" && bash "$1" http://example.com/api' \
+    run --separate-stderr bash -c 'cd "$2" && bash "$1" -p step_ http://example.com/api' \
         _ "$NAHAL_SH" "$WORK_DIR"
     [ "$status" -eq 0 ]
     [[ "$stderr" == *"docs"* ]]
@@ -559,7 +564,7 @@ CURI_RES='{"_links":{"self":{"href":"/r"},"curies":[{"name":"ex","href":"https:/
     export MOCK_BODY='{"_links":{"self":{"href":"/api/r"},"curies":[{"name":"ex","href":"https://ex.com/docs/{rel}"}]},"title":"t"}'
     _type_key '3'   # links(1) properties(2) print(3) quit(4) — no docs; 3 = print
     _type_key '4'   # quit
-    run --separate-stderr bash -c 'cd "$2" && bash "$1" http://example.com/api' \
+    run --separate-stderr bash -c 'cd "$2" && bash "$1" -p step_ http://example.com/api' \
         _ "$NAHAL_SH" "$WORK_DIR"
     [ "$status" -eq 0 ]
     [[ "$stderr" != *"docs"* ]]
@@ -571,23 +576,27 @@ CURI_RES='{"_links":{"self":{"href":"/r"},"curies":[{"name":"ex","href":"https:/
 # Keys: links(1) self(2) follow(1) GET(1) quit(5)
 _run_self_follow_session() {
     _type_key '1'; _type_key '2'; _type_key '1'; _type_key '1'; _type_key '5'
-    run bash -c 'cd "$2" && bash "$1" http://example.com/api' _ "$NAHAL_SH" "$WORK_DIR"
+    run bash -c 'cd "$2" && bash "$1" -p step_ http://example.com/api' _ "$NAHAL_SH" "$WORK_DIR"
     [ "$status" -eq 0 ]
     SESSION_DIR=$(ls -d "${WORK_DIR}"/nahal_* | head -1)
 }
 
-@test "session.sh: replay uses hallink|method|rename with predictable step names" {
+@test "session.sh: replay captures into _b[] and renames via rename.sh -p" {
     _run_self_follow_session
     local s="${SESSION_DIR}/session.sh"
     [ -f "$s" ]
-    grep -q '_ensure_method()' "$s"                       # custom-method helper in header
-    grep -q '(HTTP_IN_HEADERS="Accept:' "$s"              # header subshell grouping
-    grep -q '| rename.sh step_1' "$s"                     # initial renamed to step_1
-    grep -q 'hallink.sh step_1.body links self' "$s"      # follow re-extracts from step_1
-    grep -q '| GET --link' "$s"                           # method consumes the link
-    grep -q '| rename.sh step_2' "$s"                     # follow renamed to step_2
-    # The old broken form must be gone.
-    ! grep -q '_link=$(' "$s"
+    grep -qF '_ensure_method()' "$s"            # custom-method helper in header
+    grep -qF '_b=()' "$s"                        # response-base array initialised
+    grep -qF '_b[1]=$(' "$s"                     # initial captured as _b[1]
+    grep -qF 'HTTP_IN_HEADERS="Accept:' "$s"     # header inline on the method
+    grep -qF 'rename.sh -p step_' "$s"           # prefix-mode rename
+    grep -qF 'hallink.sh "${_b[1]}.body" links self' "$s"  # follow reads _b[1]
+    grep -qF 'GET --link' "$s"                   # method consumes the link
+    grep -qF '_b[2]=$(' "$s"                     # follow captured as _b[2]
+    # Old forms must be gone: no grouping subshell, no dead _link= / step_N rename.
+    ! grep -q '^(HTTP_IN_HEADERS' "$s"
+    ! grep -qF '_link=$(' "$s"
+    ! grep -qF 'rename.sh step_' "$s"
 }
 
 @test "session.sh: replay re-runs and recreates the predictable step files" {
@@ -606,6 +615,27 @@ _run_self_follow_session() {
     ! ls "${SESSION_DIR}"/resp.* >/dev/null 2>&1
 }
 
+@test "interactive: a templated follow records the binding values in session.sh" {
+    # _brow_prompt reads its value from _BROW_TTY (the same FIFO as the menus).
+    export _BROW_TTY="$TEST_TTY"
+    export MOCK_BODY='{"_links":{"self":{"href":"/api/r"},"search":{"href":"/q{?term}","templated":true}},"title":"Mock"}'
+    _type_key  '1'        # links
+    _type_key  '2'        # search {T}   (links: back(1) search{T}(2) self(3))
+    _type_key  '1'        # follow
+    _type_key  '2'        # term         (template menu: Continue(1) term(2))
+    _type_key  '1'        # Set single value
+    _type_line 'hello'    # the value for term
+    _type_key  '1'        # Continue
+    _type_key  '1'        # GET
+    _type_key  '5'        # quit (followed resource menu)
+    run --separate-stderr bash -c 'cd "$2" && bash "$1" -p req http://example.com/api' \
+        _ "$NAHAL_SH" "$WORK_DIR"
+    [ "$status" -eq 0 ]
+    local s
+    s=$(ls -d "${WORK_DIR}"/nahal_*/session.sh | head -1)
+    grep -qF 'hallink.sh "${_b[1]}.body" links search term=hello' "$s"
+}
+
 @test "interactive: follow a link, choose POST from the menu with no body" {
     _type_key '1'   # links
     _type_key '2'   # self     (links: back(1) self(2))
@@ -613,7 +643,7 @@ _run_self_follow_session() {
     _type_key '2'   # POST     (method: GET(1) POST(2) … HEAD(7) Other(8))
     _type_key '1'   # No body  (body: No body(1) …)
     _type_key '5'   # quit     (followed resource: links(1) properties(2) print(3) back(4) quit(5))
-    run --separate-stderr bash -c 'cd "$2" && bash "$1" http://example.com/api' \
+    run --separate-stderr bash -c 'cd "$2" && bash "$1" -p step_ http://example.com/api' \
         _ "$NAHAL_SH" "$WORK_DIR"
     [ "$status" -eq 0 ]
     # The follow request is dispatched and logged with the chosen method.

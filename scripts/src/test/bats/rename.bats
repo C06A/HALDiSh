@@ -153,3 +153,63 @@ _rename() {
     [ -f "${WORK_DIR}/foobar.txt" ]
     [ ! -f "${WORK_DIR}/bazbar.txt" ]
 }
+
+# ── prefix (-p) auto-numbering mode ────────────────────────────────────────────
+
+@test "rename -p: numbers from 1 when no prefixed files exist" {
+    touch "${WORK_DIR}/src.body" "${WORK_DIR}/src.headers"
+    _rename -p req src
+    [ "$status" -eq 0 ]
+    [ "$output" = "req1" ]
+    [ -f "${WORK_DIR}/req1.body" ]
+    [ -f "${WORK_DIR}/req1.headers" ]
+    [ ! -f "${WORK_DIR}/src.body" ]
+}
+
+@test "rename -p: continues from the largest existing number" {
+    touch "${WORK_DIR}/req2.body" "${WORK_DIR}/req5.body" "${WORK_DIR}/src.body"
+    _rename -p req src
+    [ "$output" = "req6" ]
+    [ -f "${WORK_DIR}/req6.body" ]
+    [ -f "${WORK_DIR}/req5.body" ]
+}
+
+@test "rename -p: ignores non-numeric suffixes and unrelated prefixes" {
+    touch "${WORK_DIR}/req_1.body" "${WORK_DIR}/reqX.body" \
+          "${WORK_DIR}/other3.body" "${WORK_DIR}/src.body"
+    _rename -p req src
+    [ "$output" = "req1" ]
+}
+
+@test "rename -p: empty prefix yields bare numbers" {
+    touch "${WORK_DIR}/src.body"
+    _rename -p '' src
+    [ "$output" = "1" ]
+    [ -f "${WORK_DIR}/1.body" ]
+}
+
+@test "rename -p: empty prefix ignores prefixed files when counting" {
+    touch "${WORK_DIR}/req4.body" "${WORK_DIR}/src.body"
+    _rename -p '' src
+    [ "$output" = "1" ]
+}
+
+@test "rename -p: reads old name from stdin" {
+    touch "${WORK_DIR}/src.body"
+    run bash -c "cd '${WORK_DIR}' && echo src | bash '${RENAME_SH}' -p req"
+    [ "$status" -eq 0 ]
+    [ "$output" = "req1" ]
+    [ -f "${WORK_DIR}/req1.body" ]
+}
+
+@test "rename -p: handles a prefix ending in a separator" {
+    touch "${WORK_DIR}/step_3.body" "${WORK_DIR}/src.body"
+    _rename -p step_ src
+    [ "$output" = "step_4" ]
+    [ -f "${WORK_DIR}/step_4.body" ]
+}
+
+@test "rename -p: exits 1 when the prefix argument is missing" {
+    run bash "$RENAME_SH" -p
+    [ "$status" -eq 1 ]
+}

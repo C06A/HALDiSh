@@ -3,9 +3,13 @@
 # nahal.sh — Interactive HAL API browser
 #
 # Usage:
-#   nahal.sh <URL>
-#   nahal.sh <link-text>              # HAL link object as JSON, XML, or YAML text
-#   nahal.sh <resource-file> [path…]  # HAL resource file + navigation path to a link
+#   nahal.sh [-p <prefix>] <URL>
+#   nahal.sh [-p <prefix>] <link-text>              # HAL link object (JSON/XML/YAML)
+#   nahal.sh [-p <prefix>] <resource-file> [path…]  # link extracted from a file
+#
+# -p <prefix> sets the base-name prefix for the response files (prompted when
+# omitted; an empty value is accepted).  Files are named <prefix><N>, numbered
+# from one past the largest existing <prefix><N> in the session directory.
 #
 # Interactively navigate a live HAL API starting from a URL, a HAL link object,
 # or a link extracted from a HAL resource file.  Each HTTP response is
@@ -21,11 +25,11 @@
 # or a custom RFC 7230 token) and, for body methods, a request body; methods that
 # are not installed commands are dispatched via an on-demand ./<METHOD> link.
 #
-# Each request's response files are renamed to a predictable step_<N> base, and
-# the session is logged to <session-dir>/session.sh — a re-runnable script of
-#   hallink.sh <file> <path> | <METHOD> --link | rename.sh step_<N>
-# pipelines, grouped in HTTP_IN_HEADERS subshells.  Replaying it requires the
-# HALDiSh environment on PATH (source env.sh).
+# Each request's response files are renamed (via rename.sh -p) to <prefix><N>,
+# and the session is logged to <session-dir>/session.sh — a re-runnable script
+# whose steps capture each response base into an array:
+#   _b[N]=$(hallink.sh "${_b[M]}.body" <path> | <METHOD> --link | rename.sh -p <prefix>)
+# Replaying it requires the HALDiSh environment on PATH (source env.sh).
 #
 # Requires: curl, and yq (mikefarah/yq v4) or jq (JSON only)
 # =============================================================================
@@ -53,11 +57,9 @@ _BROW_LOG=''         # path to session log script
 _BROW_STEP=0         # request counter
 _BROW_LAST_BASE=''   # base name of last response file set
 _BROW_LAST_BINDINGS=()   # uritemplate var=value bindings from the last expansion
-
-# Session-log grouping state: consecutive requests sharing the same header set
-# are wrapped in one (HTTP_IN_HEADERS=… …) subshell.
-_BROW_LOG_OPEN=0     # 1 while a header subshell is open in the log
-_BROW_LOG_HDR=''     # header content of the currently open subshell
+_BROW_LAST_URL=''        # expanded URL from the last _brow_expand_vars call
+_BROW_PREFIX=''          # user-provided base-name prefix for response files (-p)
+_BROW_PREFIX_SET=0       # 1 when -p was supplied, so the prompt is skipped
 
 # ── tool initialization ───────────────────────────────────────────────────────
 
@@ -239,67 +241,45 @@ _brow_infer_content_type() {
 
 # _brow_hdr_value <header-lines>  → quoted HTTP_IN_HEADERS assignment value
 # Layers the given (newline-separated) header lines over any inherited value so
-# the user's preset HTTP_IN_HEADERS survives, scoped to the replay subshell.
+# the user's preset HTTP_IN_HEADERS survives.
 _brow_hdr_value() {
     # shellcheck disable=SC2016 — the ${...} text is literal for the replay.
     printf '"%s${HTTP_IN_HEADERS:+\n$HTTP_IN_HEADERS}"' "$1"
 }
 
-# _brow_log_close_group — closes the open header subshell, if any.
-_brow_log_close_group() {
-    if [[ "$_BROW_LOG_OPEN" == 1 ]]; then
-        printf ')\n' >> "$_BROW_LOG"
-        _BROW_LOG_OPEN=0
-        _BROW_LOG_HDR=''
-    fi
-}
-
-# _brow_log_finalize — EXIT trap: close any open header subshell so a session
-# that ends via "quit" (exit 0) still produces a well-formed script.
-_brow_log_finalize() {
-    [[ -n "$_BROW_LOG" ]] && _brow_log_close_group
-}
-
 # _brow_log_step <header-lines> <invoke> <request-cmd> <label>
-# Appends one replay step: opens/continues/closes the header subshell as needed,
-# creates a custom method link when <invoke> is ./<NAME>, then writes the
-# pipeline ending in "| rename.sh step_<N>".  <request-cmd> is everything before
-# the rename (already shell-quoted), e.g. "hallink.sh step_1.body links x | GET --link".
+# Appends one replay step: a custom-method link when <invoke> is ./<NAME>, then
+# the response capture
+#   _b[<N>]=$(<request stages> | rename.sh -p <prefix>)
+# The header (when any) is attached as a command-prefix on the method stage —
+# the last request stage — because a standalone assignment is not exported to the
+# piped command.  <request-cmd> holds the request stages newline-separated, e.g.
+# 'hallink.sh "${_b[1]}.body" links x'$'\n''GET --link'.
 _brow_log_step() {
     local hdr="$1" invoke="$2" cmd="$3" label="$4"
-    local indent=''
-    if [[ -z "$hdr" ]]; then
-        _brow_log_close_group
-    else
-        if [[ "$_BROW_LOG_OPEN" == 1 && "$hdr" == "$_BROW_LOG_HDR" ]]; then
-            :
-        else
-            _brow_log_close_group
-            printf '(HTTP_IN_HEADERS=%s\n' "$(_brow_hdr_value "$hdr")" >> "$_BROW_LOG"
-            _BROW_LOG_OPEN=1
-            _BROW_LOG_HDR="$hdr"
-        fi
-        indent='  '
-    fi
+
     printf '\n' >> "$_BROW_LOG"   # blank line separates each request
-    [[ -n "$label" ]] && printf '%s# %s\n' "$indent" "$label" >> "$_BROW_LOG"
-    [[ "$invoke" == ./* ]] && printf '%s_ensure_method %s\n' "$indent" "${invoke#./}" >> "$_BROW_LOG"
-    # Emit the pipeline one stage per line.  Request stages arrive newline-
-    # separated in <cmd>; the rename stage is appended last.  Each stage but the
-    # last ends with a "\" continuation; stages after the first are "| "-prefixed.
+    [[ -n "$label" ]] && printf '# %s\n' "$label" >> "$_BROW_LOG"
+    [[ "$invoke" == ./* ]] && printf '_ensure_method %s\n' "${invoke#./}" >> "$_BROW_LOG"
+
     local -a segs=()
     local line
     while IFS= read -r line; do segs+=("$line"); done <<< "$cmd"
-    segs+=("rename.sh step_${_BROW_STEP}")
-    local i cont
-    for (( i = 0; i < ${#segs[@]}; i++ )); do
-        cont=' \'
-        (( i == ${#segs[@]} - 1 )) && cont=''
-        if (( i == 0 )); then
-            printf '%s%s%s\n' "$indent" "${segs[i]}" "$cont" >> "$_BROW_LOG"
-        else
-            printf '%s  | %s%s\n' "$indent" "${segs[i]}" "$cont" >> "$_BROW_LOG"
-        fi
+    # Attach the header to the method stage (the last request stage).
+    if [[ -n "$hdr" ]]; then
+        local _mi=$(( ${#segs[@]} - 1 ))
+        segs[_mi]="HTTP_IN_HEADERS=$(_brow_hdr_value "$hdr") ${segs[_mi]}"
+    fi
+    segs+=("rename.sh -p $(printf '%q' "$_BROW_PREFIX")")
+
+    # Emit the capture: first stage opens _b[N]=$( … ), the last closes it; every
+    # stage but the last ends with a "\" continuation; piped stages are "| "-led.
+    local i cont last=$(( ${#segs[@]} - 1 )) body
+    for (( i = 0; i <= last; i++ )); do
+        body="${segs[i]}"
+        if (( i == 0 )); then body="_b[${_BROW_STEP}]=\$(${body}"; else body="  | ${body}"; fi
+        if (( i == last )); then body="${body})"; cont=''; else cont=' \'; fi
+        printf '%s%s\n' "$body" "$cont" >> "$_BROW_LOG"
     done
 }
 
@@ -362,17 +342,18 @@ _brow_do_request() {
     invoke=$(_brow_invoke_name "$method")
     [[ "$invoke" == ./* ]] && _brow_link_method "$method"
 
-    # Rename the response files to the predictable step name, exactly as the
-    # generated session.sh replay does, so the live session directory matches.
+    # Rename the response files using the user prefix, exactly as the generated
+    # session.sh replay does, so the live session directory matches.  Accept is a
+    # command-prefix on the method (a standalone assignment is not exported).
     local base='' rc=0
-    local target="step_${_BROW_STEP}"
     set +e
-    HTTP_IN_HEADERS="Accept:${accept}" \
-        base=$(cd "$_BROW_OUTDIR" && "$invoke" "$url" "$@" 2>/dev/null | rename.sh "$target" 2>/dev/null)
+    base=$(cd "$_BROW_OUTDIR" \
+        && HTTP_IN_HEADERS="Accept:${accept}" "$invoke" "$url" "$@" 2>/dev/null \
+        | rename.sh -p "$_BROW_PREFIX" 2>/dev/null)
     rc=$?
     set -e
 
-    if [[ "$base" != "$target" ]]; then
+    if [[ -z "$base" ]]; then
         hal::log::error "Request failed (exit ${rc})"
         return 1
     fi
@@ -394,6 +375,8 @@ _brow_get_ct() {
 # ── TTY input ─────────────────────────────────────────────────────────────────
 
 # _brow_prompt <prompt> <varname> [default]
+# Reads a line from the controlling terminal.  _BROW_TTY overrides /dev/tty (for
+# tests), mirroring menu.sh's _MENU_TTY.
 _brow_prompt() {
     local _prompt="$1" _var="$2" _default="${3:-}"
     if [[ -n "$_default" ]]; then
@@ -402,7 +385,7 @@ _brow_prompt() {
         printf '%s: ' "$_prompt" >&2
     fi
     local _val
-    IFS= read -r _val < /dev/tty
+    IFS= read -r _val < "${_BROW_TTY:-/dev/tty}"
     _val="${_val:-$_default}"
     printf -v "$_var" '%s' "$_val"
 }
@@ -437,10 +420,11 @@ _brow_prompt_file() {
 
 # ── URI template expansion ────────────────────────────────────────────────────
 
-# _brow_expand_vars <template> <rel>  → expanded URL on stdout
-# Prompts for template variable values, expands via uritemplate.sh, and logs
-# ONLY the "$(uritemplate.sh ...)" call.  The caller is responsible for
-# logging the _template= assignment before calling this function.
+# _brow_expand_vars <template> <rel>
+# Prompts for template variable values and expands the template via
+# uritemplate.sh.  Sets _BROW_LAST_URL (the expanded URL) and _BROW_LAST_BINDINGS
+# (the chosen var=value bindings, for the replay).  Must be called directly — not
+# in a command substitution — or those globals would be lost to the subshell.
 _brow_expand_vars() {
     local tmpl="$1" rel="$2"
     hal::log::info "Templated link '${rel}': ${tmpl}"
@@ -562,11 +546,8 @@ _brow_expand_vars() {
     done
     _BROW_LAST_BINDINGS=(${bindings[@]+"${bindings[@]}"})
 
-    local expanded
-    expanded=$(bash "${_SCRIPT_DIR}/uritemplate.sh" "$tmpl" \
+    _BROW_LAST_URL=$(bash "${_SCRIPT_DIR}/uritemplate.sh" "$tmpl" \
                ${bindings[@]+"${bindings[@]}"})
-
-    printf '%s' "$expanded"
 }
 
 # ── method + body prompt ──────────────────────────────────────────────────────
@@ -763,7 +744,9 @@ _brow_follow_link() {
     # _BROW_LAST_BINDINGS captures the chosen var=value bindings for the replay.
     _BROW_LAST_BINDINGS=()
     if [[ "$templated" == "true" ]]; then
-        url=$(_brow_expand_vars "$href" "$rel")
+        # Called directly (not in $()) so _BROW_LAST_URL/_BROW_LAST_BINDINGS persist.
+        _brow_expand_vars "$href" "$rel"
+        url="$_BROW_LAST_URL"
     else
         url="$href"
     fi
@@ -785,7 +768,8 @@ _brow_follow_link() {
     # via --link; rename gives the response files the predictable step name.
     local -a halpath=(${_BROW_NAV_PATH[@]+"${_BROW_NAV_PATH[@]}"} links "$rel")
     [[ -n "$link_idx" ]] && halpath+=("$link_idx")
-    local src_cmd="hallink.sh ${src_base}.body $(_brow_qargs "${halpath[@]}")"
+    # Reference the source resource's captured base: hallink.sh "${_b[<N>]}.body"
+    local src_cmd="hallink.sh \"\${_b[${src_base}]}.body\" $(_brow_qargs "${halpath[@]}")"
     [[ ${#_BROW_LAST_BINDINGS[@]} -gt 0 ]] && \
         src_cmd+=" $(_brow_qargs "${_BROW_LAST_BINDINGS[@]}")"
     local invoke
@@ -842,7 +826,7 @@ _brow_handle_text() {
             body=$(cat "$body_file")
             fmt=$(_brow_detect_format "$body")
             json=$(_brow_to_json "$body" "$fmt")
-            _brow_navigate_resource "$json" "$url" "0" "step_${_BROW_STEP}"
+            _brow_navigate_resource "$json" "$url" "0" "${_BROW_STEP}"
             ;;
     esac
 }
@@ -876,8 +860,8 @@ _BROW_NAV_PATH=()
 
 _brow_navigate_response() {
     local body_file="$1" url="$2" is_top="$3"
-    # The logical name this response's files have in the replay (rename target).
-    local src_base="step_${_BROW_STEP}"
+    # The replay step index this response is captured as (_b[<src_base>]).
+    local src_base="${_BROW_STEP}"
     # Reset the navigation path for this freshly fetched resource, but restore
     # the caller's path on return so a nested fetch doesn't clobber the parent's.
     local _saved_path=("${_BROW_NAV_PATH[@]+"${_BROW_NAV_PATH[@]}"}")
@@ -1299,10 +1283,11 @@ _brow_usage() {
     local name
     name="$(basename "$0")"
     printf 'Usage:\n' >&2
-    printf '  %s <URL>\n' "$name" >&2
-    printf '  %s <link-text>              # HAL link object as JSON, XML, or YAML text\n' "$name" >&2
-    printf '  %s <resource-file> [path…]  # HAL resource file + navigation path to a link\n' "$name" >&2
-    printf '\nPath examples: links self    |  links items 0\n' >&2
+    printf '  %s [-p <prefix>] <URL>\n' "$name" >&2
+    printf '  %s [-p <prefix>] <link-text>              # HAL link object (JSON/XML/YAML)\n' "$name" >&2
+    printf '  %s [-p <prefix>] <resource-file> [path…]  # link extracted from a file\n' "$name" >&2
+    printf '\n-p <prefix>: base-name prefix for response files (prompted if omitted; empty allowed)\n' >&2
+    printf 'Path examples: links self    |  links items 0\n' >&2
 }
 
 _BROW_START_URL=''
@@ -1363,11 +1348,24 @@ _brow_resolve_start() {
 # helper functions in isolation without launching an interactive session.
 if [[ "${BASH_SOURCE[0]:-}" == "${0}" ]]; then
 
+# -p <prefix> sets the response-file base-name prefix (empty allowed); when
+# omitted we prompt for it.  Options precede the URL / link / file arguments.
+while getopts ":p:" _opt; do
+    case "$_opt" in
+        p) _BROW_PREFIX="$OPTARG"; _BROW_PREFIX_SET=1 ;;
+        *) _brow_usage; exit 1 ;;
+    esac
+done
+shift $(( OPTIND - 1 ))
+
 [[ $# -lt 1 ]] && { _brow_usage; exit 1; }
 
 _brow_init_tool
 _brow_setup_methods
 _brow_resolve_start "$@"
+
+# Ask for the response-file prefix when -p was not given (empty is accepted).
+[[ "$_BROW_PREFIX_SET" -eq 1 ]] || _brow_prompt "File prefix (empty for none)" _BROW_PREFIX ""
 
 # Session directory (next to where the script is run)
 _BROW_OUTDIR="$(pwd)/nahal_$(date +%Y%m%dT%H%M%S)"
@@ -1392,11 +1390,10 @@ _BROW_LOG="${_BROW_OUTDIR}/session.sh"
     printf '    local src; src="$(dirname "$(command -v GET)")/.httpreq.sh"\n'
     printf '    ln -f "$src" "./$1" 2>/dev/null || ln -sf "$src" "./$1"\n'
     printf '}\n'
+    printf '\n'
+    printf '_b=()   # response base name captured per step\n'
 } > "$_BROW_LOG"
 chmod +x "$_BROW_LOG"
-
-# Close any open header subshell on exit (covers the "quit" path's exit 0).
-trap _brow_log_finalize EXIT
 
 hal::log::info "Session directory: ${_BROW_OUTDIR}"
 hal::log::info "Session log:       ${_BROW_LOG}"
@@ -1410,7 +1407,8 @@ if [[ -n "$_BROW_START_LINK_JSON" ]]; then
     accept=$(_brow_accept_for_link "$_BROW_START_LINK_JSON")
     local_templated=$(_brow_qr "$_BROW_START_LINK_JSON" '.templated // false')
     if [[ "$local_templated" == "true" ]]; then
-        start_url=$(_brow_expand_vars "$_BROW_START_URL" "start")
+        _brow_expand_vars "$_BROW_START_URL" "start"
+        start_url="$_BROW_LAST_URL"
     fi
 fi
 
