@@ -29,14 +29,31 @@ setup() {
     # cd'd into the session output directory — and echoes the base name.
     cat > "${STUB_DIR}/GET" <<'MOCK'
 #!/usr/bin/env bash
+# Drain stdin in --link mode (like real httpreq.sh) so a `hallink | GET --link`
+# pipe doesn't break with SIGPIPE.
+case " $* " in *" --link "*) cat >/dev/null 2>&1 || true ;; esac
 base="resp"
-printf 'HTTP/1.1 200 OK\r\nContent-Type: application/hal+json\r\n\r\n' > "${base}.headers"
+ct="${MOCK_CT:-application/hal+json}"
+printf 'HTTP/1.1 200 OK\r\nContent-Type: %s\r\n\r\n' "$ct" > "${base}.headers"
 printf '200' > "${base}.status"
-printf '%s' '{ "_links": { "self": { "href": "/api/r" } }, "title": "Mock" }' > "${base}.body"
+body="${MOCK_BODY:-}"
+[[ -z "$body" ]] && body='{ "_links": { "self": { "href": "/api/r" } }, "title": "Mock" }'
+printf '%s' "$body" > "${base}.body"
 printf 'curl -X GET\n' > "${base}.curl"
-printf '%s' "$base"
+printf '%s\n' "$base"      # real httpreq.sh prints the base with a trailing newline
 MOCK
     chmod +x "${STUB_DIR}/GET"
+    # A POST command with identical behavior, for testing non-GET dispatch.
+    cp "${STUB_DIR}/GET" "${STUB_DIR}/POST"
+
+    # Stub the browser opener so "docs" tests capture the URL instead of
+    # launching a real browser.  Records to $OPEN_LOG when set.
+    cat > "${STUB_DIR}/open" <<'OPENMOCK'
+#!/usr/bin/env bash
+printf '%s\n' "$1" >> "${OPEN_LOG:-/dev/null}"
+OPENMOCK
+    chmod +x "${STUB_DIR}/open"
+
     export PATH="${STUB_DIR}:${PATH}"
 
     # FIFO-backed menu TTY so sequential menu.sh subprocesses can each read a
@@ -327,6 +344,162 @@ _src() {
     [[ "$stderr" == *"not a file"* ]]
 }
 
+# ── method token validation ───────────────────────────────────────────────────
+
+@test "_brow_valid_method: accepts standard and extension verbs" {
+    _src '_brow_valid_method GET && _brow_valid_method POST && _brow_valid_method PROPFIND'
+    [ "$status" -eq 0 ]
+}
+
+@test "_brow_valid_method: accepts the full RFC 7230 token charset" {
+    local tok='a1!#$%&'"'"'*+-.^_`|~'
+    _src '_brow_valid_method "$1"' "$tok"
+    [ "$status" -eq 0 ]
+}
+
+@test "_brow_valid_method: rejects empty input" {
+    _src '_brow_valid_method ""'
+    [ "$status" -ne 0 ]
+}
+
+@test "_brow_valid_method: rejects spaces and slashes" {
+    _src '_brow_valid_method "$1"' "bad method"
+    [ "$status" -ne 0 ]
+    _src '_brow_valid_method "$1"' "a/b"
+    [ "$status" -ne 0 ]
+}
+
+# ── runtime-local method links ─────────────────────────────────────────────────
+
+@test "_brow_link_method: hardlinks ./<METHOD> to .httpreq.sh" {
+    mkdir -p "${WORK_DIR}/lib" "${WORK_DIR}/out"
+    printf 'x' > "${WORK_DIR}/lib/.httpreq.sh"
+    _src '_SCRIPT_DIR="$1"; _BROW_OUTDIR="$2"; _brow_link_method HEAD' \
+        "${WORK_DIR}/lib" "${WORK_DIR}/out"
+    [ "$status" -eq 0 ]
+    [ "${WORK_DIR}/out/HEAD" -ef "${WORK_DIR}/lib/.httpreq.sh" ]
+}
+
+@test "_brow_link_method: falls back to a symlink when a hardlink is not possible" {
+    mkdir -p "${WORK_DIR}/out"
+    # Missing source makes `ln -f` fail, exercising the symlink fallback.
+    _src '_SCRIPT_DIR="$1"; _BROW_OUTDIR="$2"; _brow_link_method PROPFIND' \
+        "${WORK_DIR}/nonexistent" "${WORK_DIR}/out"
+    [ "$status" -eq 0 ]
+    [ -L "${WORK_DIR}/out/PROPFIND" ]
+}
+
+@test "_brow_link_method: is a no-op when the link already exists" {
+    mkdir -p "${WORK_DIR}/lib" "${WORK_DIR}/out"
+    printf 'x' > "${WORK_DIR}/lib/.httpreq.sh"
+    printf 'existing' > "${WORK_DIR}/out/HEAD"
+    _src '_SCRIPT_DIR="$1"; _BROW_OUTDIR="$2"; _brow_link_method HEAD' \
+        "${WORK_DIR}/lib" "${WORK_DIR}/out"
+    [ "$status" -eq 0 ]
+    run cat "${WORK_DIR}/out/HEAD"
+    [ "$output" = "existing" ]
+}
+
+# ── dropped file:// path normalization ────────────────────────────────────────
+
+@test "_brow_normalize_path: strips a file:// scheme" {
+    _src '_brow_normalize_path "$1"' 'file:///Users/me/x.json'
+    [ "$output" = "/Users/me/x.json" ]
+}
+
+@test "_brow_normalize_path: percent-decodes encoded characters" {
+    _src '_brow_normalize_path "$1"' 'file:///Users/me/My%20File.txt'
+    [ "$output" = "/Users/me/My File.txt" ]
+    _src '_brow_normalize_path "$1"' 'file:///a%25b%2Fc'
+    [ "$output" = "/a%b/c" ]
+}
+
+@test "_brow_normalize_path: handles the single-slash file: form" {
+    _src '_brow_normalize_path "$1"' 'file:/Users/x'
+    [ "$output" = "/Users/x" ]
+}
+
+@test "_brow_normalize_path: leaves a plain typed path unchanged (even with %)" {
+    _src '_brow_normalize_path "$1"' '/plain/path/with%20literal'
+    [ "$output" = "/plain/path/with%20literal" ]
+}
+
+@test "_brow_normalize_path: empty input stays empty" {
+    _src '_brow_normalize_path ""'
+    [ -z "$output" ]
+}
+
+# ── method invocation resolution ──────────────────────────────────────────────
+
+@test "_brow_invoke_name: standard verbs are invoked bare" {
+    _src 'printf "%s,%s" "$(_brow_invoke_name GET)" "$(_brow_invoke_name DELETE)"'
+    [ "$output" = "GET,DELETE" ]
+}
+
+@test "_brow_invoke_name: a same-named system command does not hijack HEAD" {
+    local stub; stub="$(mktemp -d)"
+    printf '#!/bin/sh\n' > "${stub}/HEAD"; chmod +x "${stub}/HEAD"
+    run env PATH="${stub}:${PATH}" bash -c \
+        'source "$1" >/dev/null 2>&1 || true; _brow_invoke_name HEAD' _ "$NAHAL_SH"
+    [ "$output" = "./HEAD" ]
+    rm -rf "$stub"
+}
+
+@test "_brow_invoke_name: custom verbs dispatch via a local link" {
+    _src '_brow_invoke_name PROPFIND'
+    [ "$output" = "./PROPFIND" ]
+}
+
+@test "_brow_invoke_name: a command in the install dir is invoked bare" {
+    local d; d="$(mktemp -d)"; d="$(cd "$d" && pwd)"   # resolve symlinks (macOS /var)
+    printf '#!/bin/sh\n' > "${d}/PURGE"; chmod +x "${d}/PURGE"
+    run env PATH="${d}:${PATH}" bash -c \
+        'source "$1" >/dev/null 2>&1 || true; _SCRIPT_DIR="$2"; _brow_invoke_name PURGE' \
+        _ "$NAHAL_SH" "$d"
+    [ "$output" = "PURGE" ]
+    rm -rf "$d"
+}
+
+@test "_brow_log_step: a custom method emits _ensure_method and ./<NAME>" {
+    run bash -c '
+        source "$1" >/dev/null 2>&1 || true
+        _BROW_LOG="$2"; _BROW_STEP=3
+        _brow_log_step "Accept:x" "./HEAD" \
+            "hallink.sh step_2.body links self | ./HEAD --link" "follow"
+        _brow_log_finalize
+        cat "$2"
+    ' _ "$NAHAL_SH" "${WORK_DIR}/log"
+    [[ "$output" == *"_ensure_method HEAD"* ]]
+    [[ "$output" == *"./HEAD --link"* ]]
+    [[ "$output" == *"| rename.sh step_3"* ]]
+    [[ "$output" == *'(HTTP_IN_HEADERS="Accept:x'* ]]
+}
+
+# ── documentation (CURIE) ─────────────────────────────────────────────────────
+
+CURI_RES='{"_links":{"self":{"href":"/r"},"curies":[{"name":"ex","href":"https://ex.com/docs/{rel}","templated":true}],"ex:widget":{"href":"/w"},"ex:item":{"href":"/i"}},"title":"t"}'
+
+@test "_brow_curi_rels: lists rels using a defined curie prefix" {
+    _src '_brow_curi_rels "$1"' "$CURI_RES"
+    [[ "$output" == *"ex:widget"* ]]
+    [[ "$output" == *"ex:item"* ]]
+}
+
+@test "_brow_curi_rels: empty when curies present but no prefixed rel uses them" {
+    _src '_brow_curi_rels "$1"' '{"_links":{"self":{"href":"/r"},"curies":[{"name":"ex","href":"x/{rel}"}]}}'
+    [ -z "$output" ]
+}
+
+@test "_brow_curi_rels: empty when there are no curies" {
+    _src '_brow_curi_rels "$1"' '{"_links":{"self":{"href":"/r"}}}'
+    [ -z "$output" ]
+}
+
+@test "_brow_resolve_curi_url: expands the curie template for a rel" {
+    _src 'links=$(_brow_qk "$1" _links); _brow_resolve_curi_url "$links" ex:widget' "$CURI_RES"
+    [ "$output" = "https://ex.com/docs/widget" ]
+}
+
 # ── interactive session smoke tests ───────────────────────────────────────────
 
 @test "interactive: GET a HAL resource then quit" {
@@ -351,4 +524,98 @@ _src() {
         _ "$NAHAL_SH" "$WORK_DIR"
     [ "$status" -eq 0 ]
     [[ "$stderr" == *"/api/r"* ]]
+}
+
+@test "interactive: GET an array of HAL resources, enter one element, then quit" {
+    export MOCK_BODY='[{"_links":{"self":{"href":"/api/a"}},"n":1},{"_links":{"self":{"href":"/api/b"}},"n":2}]'
+    _type_key '1'   # element 1   (array menu: 1:/api/a(1) 2:/api/b(2) print(3) quit(4))
+    _type_key '5'   # quit        (element resource: links(1) properties(2) print(3) back(4) quit(5))
+    run --separate-stderr bash -c 'cd "$2" && bash "$1" http://example.com/api' \
+        _ "$NAHAL_SH" "$WORK_DIR"
+    [ "$status" -eq 0 ]
+    [[ "$stderr" == *"array of 2"* ]]
+    [[ "$stderr" == *"/api/a"* ]]
+}
+
+@test "interactive: docs option appears for a CURIE resource and opens the doc URL" {
+    # Single curie rel so the docs-menu selection is deterministic regardless of
+    # whether jq (sorted) or yq (document order) lists the keys.
+    export MOCK_BODY='{"_links":{"self":{"href":"/api/r"},"curies":[{"name":"ex","href":"https://ex.com/docs/{rel}","templated":true}],"ex:widget":{"href":"/w"}},"title":"t"}'
+    export OPEN_LOG="${WORK_DIR}/opened"
+    # Resource menu: links(1) properties(2) docs(3) print(4) quit(5)
+    _type_key '3'   # docs
+    _type_key '2'   # ex:widget   (docs menu: back(1) ex:widget(2))
+    _type_key '1'   # back
+    _type_key '5'   # quit
+    run --separate-stderr bash -c 'cd "$2" && bash "$1" http://example.com/api' \
+        _ "$NAHAL_SH" "$WORK_DIR"
+    [ "$status" -eq 0 ]
+    [[ "$stderr" == *"docs"* ]]
+    run cat "${OPEN_LOG}"
+    [ "$output" = "https://ex.com/docs/widget" ]
+}
+
+@test "interactive: docs option is absent when no rel uses a curie prefix" {
+    export MOCK_BODY='{"_links":{"self":{"href":"/api/r"},"curies":[{"name":"ex","href":"https://ex.com/docs/{rel}"}]},"title":"t"}'
+    _type_key '3'   # links(1) properties(2) print(3) quit(4) — no docs; 3 = print
+    _type_key '4'   # quit
+    run --separate-stderr bash -c 'cd "$2" && bash "$1" http://example.com/api' \
+        _ "$NAHAL_SH" "$WORK_DIR"
+    [ "$status" -eq 0 ]
+    [[ "$stderr" != *"docs"* ]]
+}
+
+# ── session.sh replay generation ──────────────────────────────────────────────
+
+# Drive a fixed session (GET root → follow self → quit) and echo the session dir.
+# Keys: links(1) self(2) follow(1) GET(1) quit(5)
+_run_self_follow_session() {
+    _type_key '1'; _type_key '2'; _type_key '1'; _type_key '1'; _type_key '5'
+    run bash -c 'cd "$2" && bash "$1" http://example.com/api' _ "$NAHAL_SH" "$WORK_DIR"
+    [ "$status" -eq 0 ]
+    SESSION_DIR=$(ls -d "${WORK_DIR}"/nahal_* | head -1)
+}
+
+@test "session.sh: replay uses hallink|method|rename with predictable step names" {
+    _run_self_follow_session
+    local s="${SESSION_DIR}/session.sh"
+    [ -f "$s" ]
+    grep -q '_ensure_method()' "$s"                       # custom-method helper in header
+    grep -q '(HTTP_IN_HEADERS="Accept:' "$s"              # header subshell grouping
+    grep -q '| rename.sh step_1' "$s"                     # initial renamed to step_1
+    grep -q 'hallink.sh step_1.body links self' "$s"      # follow re-extracts from step_1
+    grep -q '| GET --link' "$s"                           # method consumes the link
+    grep -q '| rename.sh step_2' "$s"                     # follow renamed to step_2
+    # The old broken form must be gone.
+    ! grep -q '_link=$(' "$s"
+}
+
+@test "session.sh: replay re-runs and recreates the predictable step files" {
+    _run_self_follow_session
+    run bash "${SESSION_DIR}/session.sh"
+    [ "$status" -eq 0 ]
+    [ -f "${SESSION_DIR}/step_1.body" ]
+    [ -f "${SESSION_DIR}/step_2.body" ]
+}
+
+@test "live session: response files are renamed to predictable step names" {
+    _run_self_follow_session
+    [ -f "${SESSION_DIR}/step_1.body" ]
+    [ -f "${SESSION_DIR}/step_2.body" ]
+    # the auto-generated base name from the request is not left behind
+    ! ls "${SESSION_DIR}"/resp.* >/dev/null 2>&1
+}
+
+@test "interactive: follow a link, choose POST from the menu with no body" {
+    _type_key '1'   # links
+    _type_key '2'   # self     (links: back(1) self(2))
+    _type_key '1'   # follow   (action: follow(1) details(2) back(3))
+    _type_key '2'   # POST     (method: GET(1) POST(2) … HEAD(7) Other(8))
+    _type_key '1'   # No body  (body: No body(1) …)
+    _type_key '5'   # quit     (followed resource: links(1) properties(2) print(3) back(4) quit(5))
+    run --separate-stderr bash -c 'cd "$2" && bash "$1" http://example.com/api' \
+        _ "$NAHAL_SH" "$WORK_DIR"
+    [ "$status" -eq 0 ]
+    # The follow request is dispatched and logged with the chosen method.
+    [[ "$stderr" == *"POST"* ]]
 }

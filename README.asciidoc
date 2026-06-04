@@ -304,6 +304,128 @@ hal.sh response.body properties tags 0
 ----
 
 
+== `nahal.sh` — interactive HAL API browser
+
+Drive a live HAL API from the terminal.  `nahal.sh` fetches a resource,
+classifies the response by `Content-Type`, and presents menu-driven navigation
+of its links, embedded resources, properties, and documentation.  Following a
+link sends a new request (any HTTP method, with an optional body), and the whole
+session is recorded as a re-runnable `session.sh` script.
+
+Requests are made with the HTTP method commands (`GET`, `POST`, …) and responses
+are navigated with `hal.sh`, so `nahal.sh` needs the HALDiSh environment active
+(`source env.sh`) plus `curl` and `yq` or `jq`.
+
+=== Usage
+
+[source,bash]
+----
+nahal.sh <URL>                        # start from a URL
+nahal.sh <link-text>                  # start from a HAL link object (JSON/XML/YAML)
+nahal.sh <resource-file> [path…]      # start from a link extracted from a file
+----
+
+For the file form, `path` is a `hal.sh` link path, e.g. `links self` or
+`embeddeds items 0 links next`.
+
+=== Session directory
+
+Each run creates a `nahal_<timestamp>/` directory beside the working directory.
+Every request writes a file group there, renamed to a predictable base
+`step_<N>` (`step_1.body`, `step_1.headers`, `step_1.status`, …), and the session
+log is written to `nahal_<timestamp>/session.sh`.
+
+=== Response classification
+
+[cols="1,3",options="header"]
+|===
+|Content-Type |Handling
+
+|`application/hal+json`, `application/hal+xml`, `application/hal+yaml`,
+ `application/json`, `application/xml`, `application/yaml`
+|Navigate as a HAL resource — or, for a top-level array, a list of resources.
+
+|`text/*`
+|Print the content, or re-parse it as a HAL resource.
+
+|anything else
+|Offer to open the file with the system default application (`open`/`xdg-open`).
+|===
+
+=== Interactive navigation
+
+The resource menu offers only the sections the resource actually has:
+
+* `links` — browse `_links`; pick a relation (templated links are marked `{T}`),
+  choose an element for array-valued links, then *follow* it or *show link
+  details*.
+* `embedded` — descend into `_embedded` resources (selecting an index for arrays).
+* `properties` — traverse the non-HAL properties (objects, arrays, scalars).
+* `docs` — shown only when the resource has a `curies` array *and* at least one
+  relation uses a defined CURIE prefix; resolves the curie template and opens the
+  documentation page in the browser.
+* `print resource` — pretty-print the current resource.
+* `back` / `quit` — go up one level, or end the session.
+
+A top-level array of resources is listed by element (showing each `self` href);
+choose one to navigate it as a resource.
+
+=== Following a link
+
+Choosing *follow* prompts for the HTTP method from a menu of the standard verbs
+(`GET POST PUT PATCH OPTIONS DELETE HEAD`) plus *Other*, which accepts any
+RFC 7230 method token and upper-cases it.  Methods that are not installed
+commands (e.g. `HEAD` and custom verbs) are dispatched through an on-demand
+`./<METHOD>` link created in the session directory.
+
+For methods other than `GET`, `HEAD`, and `OPTIONS`, a request-body menu offers
+inline text, a text file, a URL-encoded string, multipart files, a binary file,
+or a raw upload — the same `-a`/`-u`/`-f`/`-b`/`-r` inputs as `httpreq.sh`.  A
+dropped `file://` path (for example from a macOS Finder drag) is accepted and
+percent-decoded.
+
+=== Session replay
+
+`session.sh` reproduces the session without `nahal.sh`: each step extracts the
+next link with `hallink.sh`, sends it through the method command's `--link` mode,
+and renames the response files to the same `step_<N>` base.
+
+[source,bash]
+----
+(HTTP_IN_HEADERS="Accept:application/hal+json, …"
+
+  # initial request
+  GET http://api.example.com/ \
+    | rename.sh step_1
+
+  # follow 'orders'
+  hallink.sh step_1.body links orders \
+    | GET --link \
+    | rename.sh step_2
+)
+----
+
+`Accept` is taken from the link's `type` (falling back to the HAL list when the
+link has none); a `Content-Type` is added for body requests; consecutive requests
+that share the same headers are grouped in one `HTTP_IN_HEADERS` subshell.
+Replaying requires the HALDiSh environment on `PATH` — run `source env.sh` first.
+
+=== Examples
+
+[source,bash]
+----
+# Browse an API from its entry point
+nahal.sh https://api.example.com/
+
+# Start from the "self" link extracted from a saved response
+nahal.sh response.body links self
+
+# Replay a recorded session
+source env.sh
+bash nahal_20260603T185734/session.sh
+----
+
+
 == `hallink.sh` — resolve a HAL link object's href
 
 Resolves a HAL link object's `href` field, expanding URI templates when the
@@ -1399,6 +1521,13 @@ retry, TTY simulation.
 |`hal.bats`
 |`hal.sh` — format detection, non-interactive link / embedded / property
 extraction, interactive navigation.
+
+|`nahal.bats`
+|`nahal.sh` — content-type classification, format detection / conversion, query
+helpers, HTTP-method-token validation, dropped `file://` path decoding,
+method-invocation resolution and custom-method links, CURIE docs, array-of-
+resources navigation, predictable step-file renaming, and `session.sh` replay
+generation (structural and end-to-end).
 
 |`hallink.bats`
 |`hallink.sh` — `--link` and file+path modes, URI template expansion, basename

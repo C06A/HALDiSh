@@ -7,16 +7,25 @@
 #   nahal.sh <link-text>              # HAL link object as JSON, XML, or YAML text
 #   nahal.sh <resource-file> [path…]  # HAL resource file + navigation path to a link
 #
-# Interactively navigate a HAL API starting from a URL, a HAL link object
-# file, or a link extracted from a HAL resource file.  Each HTTP response is
+# Interactively navigate a live HAL API starting from a URL, a HAL link object,
+# or a link extracted from a HAL resource file.  Each HTTP response is
 # classified by Content-Type:
 #   application/hal+{json,xml,yaml}, application/json, application/xml, application/yaml
-#                 → navigate as HAL resource
+#                 → navigate as a HAL resource (or an array of resources)
 #   text/*        → print content or re-parse as HAL
-#   other         → open with system default application
+#   other         → open with the system default application
 #
-# All requests are logged to <session-dir>/session.sh as a replayable shell
-# script of curl, yq/jq, and uritemplate.sh commands.
+# The resource menu offers links, embeddeds, properties, and — when the resource
+# has curies used by a prefixed relation — docs (opens the documentation page in
+# a browser).  Following a link prompts for an HTTP method (standard verbs, HEAD,
+# or a custom RFC 7230 token) and, for body methods, a request body; methods that
+# are not installed commands are dispatched via an on-demand ./<METHOD> link.
+#
+# Each request's response files are renamed to a predictable step_<N> base, and
+# the session is logged to <session-dir>/session.sh — a re-runnable script of
+#   hallink.sh <file> <path> | <METHOD> --link | rename.sh step_<N>
+# pipelines, grouped in HTTP_IN_HEADERS subshells.  Replaying it requires the
+# HALDiSh environment on PATH (source env.sh).
 #
 # Requires: curl, and yq (mikefarah/yq v4) or jq (JSON only)
 # =============================================================================
@@ -43,6 +52,12 @@ _BROW_OUTDIR=''      # directory for HTTP response files
 _BROW_LOG=''         # path to session log script
 _BROW_STEP=0         # request counter
 _BROW_LAST_BASE=''   # base name of last response file set
+_BROW_LAST_BINDINGS=()   # uritemplate var=value bindings from the last expansion
+
+# Session-log grouping state: consecutive requests sharing the same header set
+# are wrapped in one (HTTP_IN_HEADERS=… …) subshell.
+_BROW_LOG_OPEN=0     # 1 while a header subshell is open in the log
+_BROW_LOG_HDR=''     # header content of the currently open subshell
 
 # ── tool initialization ───────────────────────────────────────────────────────
 
@@ -191,15 +206,101 @@ _brow_log_comment() {
     printf '\n# %s\n' "$*" >> "$_BROW_LOG"
 }
 
-# _brow_log_curl_file
-# Appends the .curl replay file written by httpreq.sh for the last request
-# to the session log.  Called by _brow_do_request after each successful request.
-_brow_log_curl_file() {
-    local curl_file="${_BROW_OUTDIR}/${_BROW_LAST_BASE}.curl"
-    if [[ -f "$curl_file" ]]; then
-        cat "$curl_file" >> "$_BROW_LOG"
-        _brow_log_blank
+# _brow_is_json <text>  → exit 0 if text is JSON
+_brow_is_json() {
+    if command -v jq >/dev/null 2>&1; then
+        printf '%s' "$1" | jq '.' >/dev/null 2>&1
+    else
+        local s="${1#"${1%%[![:space:]]*}"}"   # left-trim whitespace
+        [[ "$s" == '{'* || "$s" == '['* ]]
     fi
+}
+
+# _brow_infer_content_type <body-flag...>  → Content-Type, or empty
+# Maps the chosen body flag to a request Content-Type for the replay.  Multipart
+# (-f/-F) yields nothing so curl can set its own boundary; -i is not a body.
+_brow_infer_content_type() {
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -u) printf 'application/x-www-form-urlencoded'; return ;;
+            -a) shift || true
+                if [[ $# -gt 0 ]] && _brow_is_json "$1"; then
+                    printf 'application/json'
+                else
+                    printf 'text/plain'
+                fi
+                return ;;
+            -b|-r) printf 'application/octet-stream'; return ;;
+            -f|-F) return ;;
+            *)     shift ;;
+        esac
+    done
+}
+
+# _brow_hdr_value <header-lines>  → quoted HTTP_IN_HEADERS assignment value
+# Layers the given (newline-separated) header lines over any inherited value so
+# the user's preset HTTP_IN_HEADERS survives, scoped to the replay subshell.
+_brow_hdr_value() {
+    # shellcheck disable=SC2016 — the ${...} text is literal for the replay.
+    printf '"%s${HTTP_IN_HEADERS:+\n$HTTP_IN_HEADERS}"' "$1"
+}
+
+# _brow_log_close_group — closes the open header subshell, if any.
+_brow_log_close_group() {
+    if [[ "$_BROW_LOG_OPEN" == 1 ]]; then
+        printf ')\n' >> "$_BROW_LOG"
+        _BROW_LOG_OPEN=0
+        _BROW_LOG_HDR=''
+    fi
+}
+
+# _brow_log_finalize — EXIT trap: close any open header subshell so a session
+# that ends via "quit" (exit 0) still produces a well-formed script.
+_brow_log_finalize() {
+    [[ -n "$_BROW_LOG" ]] && _brow_log_close_group
+}
+
+# _brow_log_step <header-lines> <invoke> <request-cmd> <label>
+# Appends one replay step: opens/continues/closes the header subshell as needed,
+# creates a custom method link when <invoke> is ./<NAME>, then writes the
+# pipeline ending in "| rename.sh step_<N>".  <request-cmd> is everything before
+# the rename (already shell-quoted), e.g. "hallink.sh step_1.body links x | GET --link".
+_brow_log_step() {
+    local hdr="$1" invoke="$2" cmd="$3" label="$4"
+    local indent=''
+    if [[ -z "$hdr" ]]; then
+        _brow_log_close_group
+    else
+        if [[ "$_BROW_LOG_OPEN" == 1 && "$hdr" == "$_BROW_LOG_HDR" ]]; then
+            :
+        else
+            _brow_log_close_group
+            printf '(HTTP_IN_HEADERS=%s\n' "$(_brow_hdr_value "$hdr")" >> "$_BROW_LOG"
+            _BROW_LOG_OPEN=1
+            _BROW_LOG_HDR="$hdr"
+        fi
+        indent='  '
+    fi
+    printf '\n' >> "$_BROW_LOG"   # blank line separates each request
+    [[ -n "$label" ]] && printf '%s# %s\n' "$indent" "$label" >> "$_BROW_LOG"
+    [[ "$invoke" == ./* ]] && printf '%s_ensure_method %s\n' "$indent" "${invoke#./}" >> "$_BROW_LOG"
+    # Emit the pipeline one stage per line.  Request stages arrive newline-
+    # separated in <cmd>; the rename stage is appended last.  Each stage but the
+    # last ends with a "\" continuation; stages after the first are "| "-prefixed.
+    local -a segs=()
+    local line
+    while IFS= read -r line; do segs+=("$line"); done <<< "$cmd"
+    segs+=("rename.sh step_${_BROW_STEP}")
+    local i cont
+    for (( i = 0; i < ${#segs[@]}; i++ )); do
+        cont=' \'
+        (( i == ${#segs[@]} - 1 )) && cont=''
+        if (( i == 0 )); then
+            printf '%s%s%s\n' "$indent" "${segs[i]}" "$cont" >> "$_BROW_LOG"
+        else
+            printf '%s  | %s%s\n' "$indent" "${segs[i]}" "$cont" >> "$_BROW_LOG"
+        fi
+    done
 }
 
 # ── method symlinks ───────────────────────────────────────────────────────────
@@ -209,6 +310,39 @@ _brow_setup_methods() {
     printf 'nahal: HTTP method commands (GET, POST, …) not found in PATH.\n' >&2
     printf 'nahal: Install the HALDiSh archive first: bash HALDiSh-<version>.run\n' >&2
     exit 1
+}
+
+# _brow_link_method <METHOD>
+# Makes the dispatcher invokable as ./<METHOD> from the session directory, for
+# methods that have no installed command on PATH (HEAD, custom verbs).  Creates
+# a hardlink to .httpreq.sh; falls back to a symlink when a hardlink is not
+# possible (e.g. the session directory is on a different filesystem than the
+# install directory).  No-op if the link already exists.
+_brow_link_method() {
+    local m="$1"
+    local dst="${_BROW_OUTDIR}/${m}"
+    [[ -e "$dst" ]] && return 0
+    local src="${_SCRIPT_DIR}/.httpreq.sh"
+    ln -f "$src" "$dst" 2>/dev/null || ln -sf "$src" "$dst"
+}
+
+# _brow_invoke_name <METHOD>  → how the method is invoked: bare name or ./<METHOD>.
+# A method is invoked bare only when it is a standard installed verb, or resolves
+# to a command inside the HALDiSh install dir.  Anything else (HEAD, custom verbs)
+# is dispatched via a session-local ./<METHOD> link so a same-named system command
+# (e.g. /usr/bin/HEAD from libwww-perl) cannot hijack it.  Used for both the live
+# call and the replay log, so they always agree.
+_brow_invoke_name() {
+    local m="$1" v p
+    for v in GET POST PUT PATCH OPTIONS DELETE; do
+        [[ "$m" == "$v" ]] && { printf '%s' "$m"; return; }
+    done
+    p=$(command -v "$m" 2>/dev/null) || p=''
+    if [[ -n "$p" && "$(cd "$(dirname "$p")" 2>/dev/null && pwd)" == "$_SCRIPT_DIR" ]]; then
+        printf '%s' "$m"
+    else
+        printf './%s' "$m"
+    fi
 }
 
 # ── HTTP request ──────────────────────────────────────────────────────────────
@@ -221,15 +355,25 @@ _brow_do_request() {
     _BROW_STEP=$(( _BROW_STEP + 1 ))
     hal::log::info "Step ${_BROW_STEP}: ${method} ${url}"
 
+    # Resolve how to invoke the method.  Installed methods (GET, POST, …) are on
+    # PATH and called bare; anything else (HEAD, custom verbs) is dispatched via
+    # a session-local ./<METHOD> link created on demand.
+    local invoke
+    invoke=$(_brow_invoke_name "$method")
+    [[ "$invoke" == ./* ]] && _brow_link_method "$method"
+
+    # Rename the response files to the predictable step name, exactly as the
+    # generated session.sh replay does, so the live session directory matches.
     local base='' rc=0
+    local target="step_${_BROW_STEP}"
     set +e
     HTTP_IN_HEADERS="Accept:${accept}" \
-        base=$(cd "$_BROW_OUTDIR" && "$method" "$url" "$@" 2>/dev/null)
+        base=$(cd "$_BROW_OUTDIR" && "$invoke" "$url" "$@" 2>/dev/null | rename.sh "$target" 2>/dev/null)
     rc=$?
     set -e
 
-    if [[ -z "$base" ]]; then
-        hal::log::error "Request failed (curl exit ${rc})"
+    if [[ "$base" != "$target" ]]; then
+        hal::log::error "Request failed (exit ${rc})"
         return 1
     fi
 
@@ -237,7 +381,6 @@ _brow_do_request() {
     status=$(cat "${_BROW_OUTDIR}/${base}.status" 2>/dev/null || printf '???')
     hal::log::info "  HTTP ${status} — ${base}.{status,headers,body}"
     _BROW_LAST_BASE="$base"
-    _brow_log_curl_file
 }
 
 # _brow_get_ct <headers-file>  → Content-Type value
@@ -262,6 +405,34 @@ _brow_prompt() {
     IFS= read -r _val < /dev/tty
     _val="${_val:-$_default}"
     printf -v "$_var" '%s' "$_val"
+}
+
+# _brow_normalize_path <input>  → filesystem path on stdout
+# Dragging a file from the macOS Finder (and some other apps) into a terminal
+# pastes a percent-encoded file:// URI rather than a plain path.  When the input
+# carries a file: scheme, strip it and percent-decode; otherwise return the
+# input unchanged (so typed paths — which may legitimately contain '%' — are
+# never altered).
+_brow_normalize_path() {
+    local p="$1"
+    case "$p" in
+        file://*) p="${p#file://}" ;;   # file:///path  → /path
+        file:*)   p="${p#file:}"   ;;   # file:/path    → /path
+        *)        printf '%s' "$p"; return ;;
+    esac
+    # Percent-decode: turn %XX into \xXX and let printf interpret the escapes.
+    # Backslashes are pre-escaped so a literal '\' in the URI survives intact.
+    p="${p//\\/\\\\}"
+    printf '%b' "${p//%/\\x}"
+}
+
+# _brow_prompt_file <prompt> <varname>
+# Prompt for a filesystem path, normalizing a pasted file:// URI (see
+# _brow_normalize_path).  An empty entry yields an empty value.
+_brow_prompt_file() {
+    local _fp_prompt="$1" _fp_var="$2" _fp_raw
+    _brow_prompt "$_fp_prompt" _fp_raw ""
+    printf -v "$_fp_var" '%s' "$(_brow_normalize_path "$_fp_raw")"
 }
 
 # ── URI template expansion ────────────────────────────────────────────────────
@@ -381,30 +552,37 @@ _brow_expand_vars() {
         esac
     done
 
-    # Collect ordered bindings for uritemplate.sh and the log
-    local bindings=() log_bindings=()
+    # Collect ordered bindings for uritemplate.sh.  Expose them to the session
+    # logger (as uritemplate/hallink "var=value" args) so the replay can re-expand
+    # the same template; the logger quotes them.
+    local bindings=()
     local b
     for b in ${_tpl_bindings[@]+"${_tpl_bindings[@]}"}; do
         bindings+=("$b")
-        log_bindings+=("$(printf '%q' "$b")")
     done
+    _BROW_LAST_BINDINGS=(${bindings[@]+"${bindings[@]}"})
 
     local expanded
     expanded=$(bash "${_SCRIPT_DIR}/uritemplate.sh" "$tmpl" \
                ${bindings[@]+"${bindings[@]}"})
 
-    # Log only the uritemplate expansion line (caller wrote _template=...)
-    printf '_link=$(bash uritemplate.sh "$_template"' >> "$_BROW_LOG"
-    local lb
-    for lb in ${log_bindings[@]+"${log_bindings[@]}"}; do
-        printf ' %s' "$lb" >> "$_BROW_LOG"
-    done
-    printf ')\n' >> "$_BROW_LOG"
-
     printf '%s' "$expanded"
 }
 
 # ── method + body prompt ──────────────────────────────────────────────────────
+
+# Standard methods offered in the selection menu.  GET..DELETE are installed as
+# hardlinks on PATH by setup.sh; HEAD has no install hardlink and is dispatched
+# via a runtime-local link, exactly like a typed custom method.
+readonly _BROW_METHODS=(GET POST PUT PATCH OPTIONS DELETE HEAD)
+
+# _brow_valid_method <token>
+# True when the token is a non-empty RFC 7230 method token: ALPHA / DIGIT /
+# "!" "#" "$" "%" "&" "'" "*" "+" "-" "." "^" "_" "`" "|" "~".
+_brow_valid_method() {
+    local _re='^[A-Za-z0-9!#$%&'\''*+.^_`|~-]+$'
+    [[ "$1" =~ $_re ]]
+}
 
 # Sets _BROW_REQ_METHOD and _BROW_REQ_BODY_ARGS
 _BROW_REQ_METHOD=''
@@ -412,13 +590,37 @@ _BROW_REQ_BODY_ARGS=()
 
 _brow_prompt_method_body() {
     local default_method="${1:-GET}"
-    local method
-    _brow_prompt "HTTP method" method "$default_method"
-    _BROW_REQ_METHOD="${method^^}"
+    _BROW_REQ_METHOD=''
     _BROW_REQ_BODY_ARGS=()
 
+    # Select a method from the standard set, or type one by hand.  The prompt
+    # shows the default (reset to GET on every follow).
+    local choice
+    choice=$(printf '%s\n' "${_BROW_METHODS[@]}" "${_BROW_NAV}Other (type a method)" \
+        | menu.sh "HTTP method [${default_method}]")
+
+    if [[ "$choice" == "Other (type a method)" ]]; then
+        # Free-text entry: uppercase immediately; empty cancels back to the
+        # default method; invalid tokens re-prompt in a loop.
+        local entry
+        while true; do
+            _brow_prompt "HTTP method" entry ""
+            entry="${entry^^}"
+            [[ -z "$entry" ]] && { _BROW_REQ_METHOD="${default_method^^}"; break; }
+            if _brow_valid_method "$entry"; then
+                _BROW_REQ_METHOD="$entry"
+                break
+            fi
+            hal::log::warn "Invalid method: must be an RFC 7230 token (letters, digits, ! # \$ % & ' * + - . ^ _ \` | ~)"
+        done
+    else
+        _BROW_REQ_METHOD="${choice^^}"
+    fi
+
+    # A request body is meaningful for every method except GET/HEAD/OPTIONS.
     case "$_BROW_REQ_METHOD" in
-        POST|PUT|PATCH)
+        GET|HEAD|OPTIONS) ;;
+        *)
             local body_choice
             body_choice=$(printf '%s\n' \
                 "No body" \
@@ -437,7 +639,7 @@ _brow_prompt_method_body() {
                     [[ -n "$body" ]] && _BROW_REQ_BODY_ARGS=(-a "$body")
                     ;;
                 "Text file"*)
-                    _brow_prompt "File path" bfile ""
+                    _brow_prompt_file "File path" bfile
                     if [[ -f "$bfile" ]]; then
                         _BROW_REQ_BODY_ARGS=(-a "$(cat "$bfile")")
                     else
@@ -451,7 +653,7 @@ _brow_prompt_method_body() {
                     ;;
                 "Multipart files"*)
                     while true; do
-                        _brow_prompt "File path (empty to finish)" bfile ""
+                        _brow_prompt_file "File path (empty to finish)" bfile
                         [[ -z "$bfile" ]] && break
                         if [[ -f "$bfile" ]]; then
                             _BROW_REQ_BODY_ARGS+=(-f "$bfile")
@@ -461,7 +663,7 @@ _brow_prompt_method_body() {
                     done
                     ;;
                 "Binary file"*)
-                    _brow_prompt "File path" bfile ""
+                    _brow_prompt_file "File path" bfile
                     if [[ -f "$bfile" ]]; then
                         _BROW_REQ_BODY_ARGS=(-b "$bfile")
                     else
@@ -469,7 +671,7 @@ _brow_prompt_method_body() {
                     fi
                     ;;
                 "Raw upload"*)
-                    _brow_prompt "File path" bfile ""
+                    _brow_prompt_file "File path" bfile
                     if [[ -f "$bfile" ]]; then
                         _BROW_REQ_BODY_ARGS=(-r "$bfile")
                     else
@@ -506,11 +708,40 @@ _brow_rel_filter() {
     printf '._links[%s].href' "\"${rel}\""
 }
 
-# _brow_follow_link <link_json> <rel>
-# Sends request, handles response.  Returns 0 if navigated into new HAL
-# resource (recursive call completed), 1 if non-HAL (stay on current resource).
+# _brow_qargs <arg...>  → space-joined, shell-quoted argument string
+_brow_qargs() {
+    local out='' a
+    for a in "$@"; do out+="${out:+ }$(printf '%q' "$a")"; done
+    printf '%s' "$out"
+}
+
+# _brow_req_headers <link_json> <body-flag...>  → header lines for the replay
+# Accept is added only when the link has no type (typed links get Accept from
+# `--link`); a Content-Type line is added for body requests.  Lines are
+# newline-separated, as httpreq.sh expects in HTTP_IN_HEADERS.
+_brow_req_headers() {
+    local link_json="$1"; shift
+    local t hdr=''
+    t=$(_brow_qkr "$link_json" 'type' 2>/dev/null || printf '')
+    [[ -z "$t" || "$t" == null ]] && hdr="Accept:${_BROW_HAL_ACCEPT}"
+    local ct
+    ct=$(_brow_infer_content_type "$@")
+    if [[ -n "$ct" ]]; then
+        if [[ -n "$hdr" ]]; then
+            hdr="${hdr}"$'\n'"Content-Type:${ct}"
+        else
+            hdr="Content-Type:${ct}"
+        fi
+    fi
+    printf '%s' "$hdr"
+}
+
+# _brow_follow_link <link_json> <rel> <src_base> [link_idx]
+# Sends request, handles response, and logs a replayable step that re-extracts
+# the link from <src_base>.body at the current navigation path.  Returns 0 if it
+# navigated into a new HAL resource, 1 if non-HAL (stay on current resource).
 _brow_follow_link() {
-    local link_json="$1" rel="$2"
+    local link_json="$1" rel="$2" src_base="$3" link_idx="${4:-}"
 
     local href templated accept url
     accept=$(_brow_accept_for_link "$link_json")
@@ -528,29 +759,12 @@ _brow_follow_link() {
     href=$(_brow_qkr "$link_json" 'href')
     templated=$(_brow_qr  "$link_json" '.templated // false')
 
-    _brow_log_comment "Step ${_BROW_STEP}: follow link '${rel}'"
-
-    # Log _template= or _link= assignment, then expand if templated
+    # Resolve the live URL (interactive template expansion when templated).
+    # _BROW_LAST_BINDINGS captures the chosen var=value bindings for the replay.
+    _BROW_LAST_BINDINGS=()
     if [[ "$templated" == "true" ]]; then
-        # Write _template= assignment: from jq/yq extraction or literal fallback
-        if [[ -n "$_BROW_LAST_BASE" ]]; then
-            printf '_template=$(%s -r %s %s)\n' \
-                "$_BROW_TOOL" \
-                "$(printf '%q' "$(_brow_rel_filter "$rel")")" \
-                "$(printf '%q' "${_BROW_LAST_BASE}.body")" >> "$_BROW_LOG"
-        else
-            printf '_template=%s\n' "$(printf '%q' "$href")" >> "$_BROW_LOG"
-        fi
         url=$(_brow_expand_vars "$href" "$rel")
     else
-        if [[ -n "$_BROW_LAST_BASE" ]]; then
-            printf '_link=$(%s -r %s %s)\n' \
-                "$_BROW_TOOL" \
-                "$(printf '%q' "$(_brow_rel_filter "$rel")")" \
-                "$(printf '%q' "${_BROW_LAST_BASE}.body")" >> "$_BROW_LOG"
-        else
-            printf '_link=%s\n' "$(printf '%q' "$href")" >> "$_BROW_LOG"
-        fi
         url="$href"
     fi
 
@@ -565,6 +779,21 @@ _brow_follow_link() {
         hal::log::warn "Request failed — staying on current resource"
         return 1
     fi
+
+    # Log the replay step: hallink re-extracts (and re-expands) this link from the
+    # source resource's body at the current navigation path; the method sends it
+    # via --link; rename gives the response files the predictable step name.
+    local -a halpath=(${_BROW_NAV_PATH[@]+"${_BROW_NAV_PATH[@]}"} links "$rel")
+    [[ -n "$link_idx" ]] && halpath+=("$link_idx")
+    local src_cmd="hallink.sh ${src_base}.body $(_brow_qargs "${halpath[@]}")"
+    [[ ${#_BROW_LAST_BINDINGS[@]} -gt 0 ]] && \
+        src_cmd+=" $(_brow_qargs "${_BROW_LAST_BINDINGS[@]}")"
+    local invoke
+    invoke=$(_brow_invoke_name "$method")
+    local req_cmd="${src_cmd}"$'\n'"${invoke} --link"
+    [[ ${#body_args[@]} -gt 0 ]] && req_cmd+=" $(_brow_qargs "${body_args[@]}")"
+    _brow_log_step "$(_brow_req_headers "$link_json" ${body_args[@]+"${body_args[@]}"})" \
+        "$invoke" "$req_cmd" "follow '${rel}'"
 
     local status ct cls
     status=$(cat "${_BROW_OUTDIR}/${_BROW_LAST_BASE}.status" 2>/dev/null || printf '0')
@@ -613,7 +842,7 @@ _brow_handle_text() {
             body=$(cat "$body_file")
             fmt=$(_brow_detect_format "$body")
             json=$(_brow_to_json "$body" "$fmt")
-            _brow_navigate_resource "$json" "$url" "0"
+            _brow_navigate_resource "$json" "$url" "0" "step_${_BROW_STEP}"
             ;;
     esac
 }
@@ -647,23 +876,46 @@ _BROW_NAV_PATH=()
 
 _brow_navigate_response() {
     local body_file="$1" url="$2" is_top="$3"
+    # The logical name this response's files have in the replay (rename target).
+    local src_base="step_${_BROW_STEP}"
+    # Reset the navigation path for this freshly fetched resource, but restore
+    # the caller's path on return so a nested fetch doesn't clobber the parent's.
+    local _saved_path=("${_BROW_NAV_PATH[@]+"${_BROW_NAV_PATH[@]}"}")
     _BROW_NAV_PATH=()
     local body fmt json
     body=$(cat "$body_file")
     fmt=$(_brow_detect_format "$body")
     json=$(_brow_to_json "$body" "$fmt")
-    _brow_navigate_resource "$json" "$url" "$is_top"
+    _brow_navigate_resource "$json" "$url" "$is_top" "$src_base"
+    _BROW_NAV_PATH=("${_saved_path[@]+"${_saved_path[@]}"}")
 }
 
-# _brow_navigate_resource <json> <url> <is_top>
+# _brow_navigate_resource <json> <url> <is_top> <src_base>
 # Interactive navigation.  Returns 0 on "back", exits on "quit".
+# <src_base> is the logical step name of the body this resource was loaded from.
 _brow_navigate_resource() {
-    local json="$1" url="$2" is_top="$3"
+    local json="$1" url="$2" is_top="$3" src_base="$4"
 
-    local has_links has_embedded has_props
+    # A HAL document may be a single resource (object) or an array of resources
+    # (e.g. a collection returned as a bare JSON/XML/YAML array).  Object key
+    # probes like has("_links") error on an array, so dispatch by type first.
+    local rtype
+    rtype=$(_brow_qtype "$json")
+    case "$rtype" in
+        array)  _brow_navigate_array "$json" "$url" "$is_top" "$src_base"; return ;;
+        object) ;;
+        *)      # scalar — nothing to navigate into; just show it
+                _brow_pretty "$json"; return ;;
+    esac
+
+    local has_links has_embedded has_props has_docs
     has_links=$(_brow_qr    "$json" 'has("_links")')
     has_embedded=$(_brow_qr "$json" 'has("_embedded")')
     has_props=$(_brow_qr    "$json" 'del(._links,._embedded) | length > 0')
+    # Offer docs only when the resource has a curies array AND at least one rel
+    # actually uses a defined CURIE prefix.
+    has_docs="false"
+    [[ "$has_links" == "true" && -n "$(_brow_curi_rels "$json")" ]] && has_docs="true"
 
     while true; do
         printf '\n[ %s ]\n' "$url" >&2
@@ -672,6 +924,7 @@ _brow_navigate_resource() {
         [[ "$has_links"    == "true" ]] && opts+=("links")
         [[ "$has_embedded" == "true" ]] && opts+=("embedded")
         [[ "$has_props"    == "true" ]] && opts+=("properties")
+        [[ "$has_docs"     == "true" ]] && opts+=("docs")
         opts+=("${_BROW_NAV}print resource")
         if [[ "$is_top" == "1" ]]; then
             opts+=("${_BROW_NAV}quit")
@@ -684,9 +937,10 @@ _brow_navigate_resource() {
         chosen=$(printf '%s\n' "${opts[@]}" | menu.sh "Resource")
 
         case "$chosen" in
-            links)           _brow_nav_links      "$json" "$url" ;;
-            embedded)        _brow_nav_embedded   "$json" ;;
+            links)           _brow_nav_links      "$json" "$url" "$src_base" ;;
+            embedded)        _brow_nav_embedded   "$json" "$src_base" ;;
             properties)      _brow_nav_properties "$json" ;;
+            docs)            _brow_nav_docs       "$json" ;;
             "print resource") _brow_pretty "$json" ;;
             back)            return 0 ;;
             quit)            exit 0 ;;
@@ -694,9 +948,60 @@ _brow_navigate_resource() {
     done
 }
 
-# _brow_nav_links <json> <url>
+# _brow_navigate_array <json> <url> <is_top>
+# Navigate an array of HAL resources: list the elements (showing each one's
+# self href when present), then recurse into the chosen element as a resource.
+# Returns 0 on "back", exits on "quit".
+_brow_navigate_array() {
+    local json="$1" url="$2" is_top="$3" src_base="$4"
+    local count
+    count=$(_brow_qr "$json" 'length')
+
+    while true; do
+        printf '\n[ %s ] (array of %s)\n' "$url" "$count" >&2
+
+        local opts=() i
+        for (( i = 0; i < count; i++ )); do
+            local entry href
+            entry=$(_brow_qi "$json" "$i")
+            href=$(_brow_qr "$entry" '._links.self.href // .href // empty')
+            if [[ -n "$href" ]]; then
+                opts+=("$(( i + 1 )): ${href}")
+            else
+                opts+=("$(( i + 1 ))")
+            fi
+        done
+        opts+=("${_BROW_NAV}print resource")
+        if [[ "$is_top" == "1" ]]; then
+            opts+=("${_BROW_NAV}quit")
+        else
+            opts+=("${_BROW_NAV}back")
+            opts+=("${_BROW_NAV}quit")
+        fi
+
+        local chosen
+        chosen=$(printf '%s\n' "${opts[@]}" | menu.sh "Array")
+
+        case "$chosen" in
+            "print resource") _brow_pretty "$json" ;;
+            back)             return 0 ;;
+            quit)             exit 0 ;;
+            *)
+                local idx="${chosen%%:*}"
+                local elem
+                elem=$(_brow_qi "$json" "$(( idx - 1 ))")
+                local _saved_path=("${_BROW_NAV_PATH[@]+"${_BROW_NAV_PATH[@]}"}")
+                _BROW_NAV_PATH=("${_saved_path[@]+"${_saved_path[@]}"}" "$(( idx - 1 ))")
+                _brow_navigate_resource "$elem" "${url} [${idx}]" "0" "$src_base"
+                _BROW_NAV_PATH=("${_saved_path[@]+"${_saved_path[@]}"}")
+                ;;
+        esac
+    done
+}
+
+# _brow_nav_links <json> <url> <src_base>
 _brow_nav_links() {
-    local json="$1" url="$2"
+    local json="$1" url="$2" src_base="$3"
     local links rels
     links=$(_brow_qk "$json" "_links")
     rels=$(_brow_qr  "$links" 'keys[]')
@@ -725,8 +1030,9 @@ _brow_nav_links() {
         lobj=$(_brow_qk "$links" "$rel")
         ltype=$(_brow_qtype "$lobj")
 
-        # If link is an array, let user pick which one
-        local link_obj
+        # If link is an array, let user pick which one.  link_idx feeds the
+        # replay hal-path (links <rel> <idx>); empty for a single link object.
+        local link_obj link_idx=''
         if [[ "$ltype" == "array" ]]; then
             local count i idx_opts=("${_BROW_NAV}back")
             count=$(_brow_qr "$lobj" 'length')
@@ -746,6 +1052,7 @@ _brow_nav_links() {
             [[ "$idx_choice" == "back" ]] && continue
             local idx="${idx_choice%%:*}"
             link_obj=$(_brow_qi "$lobj" "$idx")
+            link_idx="$idx"
         else
             link_obj="$lobj"
         fi
@@ -768,7 +1075,7 @@ _brow_nav_links() {
                 # `|| true`: a non-HAL response makes _brow_follow_link return 1 as
                 # a "stay on current resource" signal — not an error. Without this,
                 # `set -e` would treat the failed case arm as fatal and exit.
-                "follow (send request)") _brow_follow_link "$link_obj" "$rel" || true; break ;;
+                "follow (send request)") _brow_follow_link "$link_obj" "$rel" "$src_base" "$link_idx" || true; break ;;
                 "show link details")     _brow_pretty "$link_obj" ;;
                 back)                    break ;;
             esac
@@ -776,9 +1083,9 @@ _brow_nav_links() {
     done
 }
 
-# _brow_nav_embedded <json>
+# _brow_nav_embedded <json> <src_base>
 _brow_nav_embedded() {
-    local json="$1"
+    local json="$1" src_base="$2"
     local embedded rels
     embedded=$(_brow_qk "$json" "_embedded")
     rels=$(_brow_qr "$embedded" 'keys[]')
@@ -812,10 +1119,10 @@ _brow_nav_embedded() {
             local elem
             elem=$(_brow_qi "$item" "$(( idx - 1 ))")
             _BROW_NAV_PATH=("${_saved_path[@]+"${_saved_path[@]}"}" "embeddeds" "$chosen" "$(( idx - 1 ))")
-            _brow_navigate_resource "$elem" "(embedded ${chosen}[${idx}])" "0"
+            _brow_navigate_resource "$elem" "(embedded ${chosen}[${idx}])" "0" "$src_base"
         else
             _BROW_NAV_PATH=("${_saved_path[@]+"${_saved_path[@]}"}" "embeddeds" "$chosen")
-            _brow_navigate_resource "$item" "(embedded ${chosen})" "0"
+            _brow_navigate_resource "$item" "(embedded ${chosen})" "0" "$src_base"
         fi
         _BROW_NAV_PATH=("${_saved_path[@]+"${_saved_path[@]}"}")
     done
@@ -895,6 +1202,97 @@ _brow_nav_properties() {
     done
 }
 
+# ── documentation (CURIE) ─────────────────────────────────────────────────────
+
+# _brow_curi_rels <json>  → CURIE-prefixed rels, one per line
+# Lists each _links rel of the form "<prefix>:<name>" whose <prefix> is defined
+# in the resource's _links.curies array.  Prints nothing when the resource has
+# no curies array or no rel uses a defined prefix.
+_brow_curi_rels() {
+    local json="$1"
+    local links
+    links=$(_brow_qk "$json" "_links")
+    [[ "$(_brow_qr "$links" 'has("curies")')" == "true" ]] || return 0
+
+    local curies_json count i
+    curies_json=$(_brow_qk "$links" "curies")
+    count=$(_brow_qr "$curies_json" 'length')
+    local -a names=()
+    for (( i = 0; i < count; i++ )); do
+        names+=("$(_brow_qkr "$(_brow_qi "$curies_json" "$i")" 'name')")
+    done
+
+    local rel prefix n
+    while IFS= read -r rel; do
+        [[ "$rel" == *:* ]] || continue
+        prefix="${rel%%:*}"
+        for n in "${names[@]}"; do
+            [[ "$n" == "$prefix" ]] && { printf '%s\n' "$rel"; break; }
+        done
+    done < <(_brow_qr "$links" 'keys[]')
+}
+
+# _brow_resolve_curi_url <links_json> <rel>  → documentation URL on stdout
+# Expands the matching curie href template (e.g. {rel}) for the rel's prefix.
+# Returns 1 when no curie defines the rel's prefix.
+_brow_resolve_curi_url() {
+    local links="$1" rel="$2"
+    local prefix="${rel%%:*}" local_name="${rel#*:}"
+    local curies_json count i obj name href
+    curies_json=$(_brow_qk "$links" "curies")
+    count=$(_brow_qr "$curies_json" 'length')
+    for (( i = 0; i < count; i++ )); do
+        obj=$(_brow_qi "$curies_json" "$i")
+        name=$(_brow_qkr "$obj" 'name')
+        if [[ "$name" == "$prefix" ]]; then
+            href=$(_brow_qkr "$obj" 'href')
+            bash "${_SCRIPT_DIR}/uritemplate.sh" "$href" "rel=${local_name}"
+            return 0
+        fi
+    done
+    return 1
+}
+
+# _brow_open_docs <url>  → opens the documentation page in the default browser
+_brow_open_docs() {
+    local url="$1"
+    hal::log::info "Opening: ${url}"
+    if command -v open >/dev/null 2>&1; then
+        open "$url"
+    elif command -v xdg-open >/dev/null 2>&1; then
+        xdg-open "$url"
+    else
+        hal::log::warn "No browser opener found (tried open, xdg-open).  URL: ${url}"
+    fi
+}
+
+# _brow_nav_docs <json>
+# Menu of CURIE-prefixed rels; resolves the chosen rel's curie template to a
+# documentation URL and opens it in the browser.
+_brow_nav_docs() {
+    local json="$1"
+    local links
+    links=$(_brow_qk "$json" "_links")
+
+    local -a rels=()
+    local r
+    while IFS= read -r r; do [[ -n "$r" ]] && rels+=("$r"); done < <(_brow_curi_rels "$json")
+
+    while true; do
+        local opts=("${_BROW_NAV}back" "${rels[@]+"${rels[@]}"}")
+        local chosen
+        chosen=$(printf '%s\n' "${opts[@]}" | menu.sh "Docs")
+        [[ "$chosen" == "back" ]] && return 0
+
+        local doc_url
+        if doc_url=$(_brow_resolve_curi_url "$links" "$chosen"); then
+            _brow_open_docs "$doc_url"
+        else
+            hal::log::warn "No CURI found for prefix: ${chosen%%:*}"
+        fi
+    done
+}
+
 # ── argument resolution ───────────────────────────────────────────────────────
 
 _brow_usage() {
@@ -909,6 +1307,8 @@ _brow_usage() {
 
 _BROW_START_URL=''
 _BROW_START_LINK_JSON=''
+_BROW_START_MODE=''      # url | link | file — how the session was started
+_BROW_START_ARGS=()      # original CLI args, replayed verbatim in step 1
 
 _brow_resolve_start() {
     local first="${1:-}"
@@ -919,11 +1319,15 @@ _brow_resolve_start() {
     # Case 1: URL
     if [[ "$first" == http://* || "$first" == https://* ]]; then
         _BROW_START_URL="$first"
+        _BROW_START_MODE=url
+        _BROW_START_ARGS=("$first")
         return
     fi
 
     if [[ $# -gt 0 ]]; then
         # Case 3: resource file + navigation path to a link
+        _BROW_START_MODE=file
+        _BROW_START_ARGS=("$first" "$@")
         [[ ! -f "$first" ]] && { printf 'nahal: not a file: %s\n' "$first" >&2; exit 1; }
         local link_raw link_fmt link_json
         link_raw=$(bash "${_SCRIPT_DIR}/hal.sh" "$first" "$@")
@@ -941,6 +1345,8 @@ _brow_resolve_start() {
         fi
     else
         # Case 2: link text (JSON, XML, or YAML) passed directly as argument
+        _BROW_START_MODE=link
+        _BROW_START_ARGS=("$first")
         local fmt json
         fmt=$(_brow_detect_format "$first")
         json=$(_brow_to_json "$first" "$fmt")
@@ -968,16 +1374,29 @@ _BROW_OUTDIR="$(pwd)/nahal_$(date +%Y%m%dT%H%M%S)"
 mkdir -p "$_BROW_OUTDIR"
 _BROW_LOG="${_BROW_OUTDIR}/session.sh"
 
-# Write session log header
+# Write session log header.  The replay requires the HALDiSh environment on
+# PATH (GET/POST/…, hallink.sh, rename.sh, uritemplate.sh) — source env.sh first.
+# _ensure_method recreates a custom-method link if the session dir was moved.
 {
     printf '#!/usr/bin/env bash\n'
     printf '# HAL Browse session — %s\n' "$(date)"
     printf '# Starting URL: %s\n' "$_BROW_START_URL"
     printf '# Run from:     %s\n' "$_BROW_OUTDIR"
+    printf '# Requires the HALDiSh environment on PATH (source env.sh).\n'
     printf 'set -euo pipefail\n'
     printf 'cd "$(dirname "$0")"\n'
+    printf '\n'
+    printf '_ensure_method() {\n'
+    printf '    command -v "$1" >/dev/null 2>&1 && return 0\n'
+    printf '    [ -e "./$1" ] && return 0\n'
+    printf '    local src; src="$(dirname "$(command -v GET)")/.httpreq.sh"\n'
+    printf '    ln -f "$src" "./$1" 2>/dev/null || ln -sf "$src" "./$1"\n'
+    printf '}\n'
 } > "$_BROW_LOG"
 chmod +x "$_BROW_LOG"
+
+# Close any open header subshell on exit (covers the "quit" path's exit 0).
+trap _brow_log_finalize EXIT
 
 hal::log::info "Session directory: ${_BROW_OUTDIR}"
 hal::log::info "Session log:       ${_BROW_LOG}"
@@ -985,23 +1404,44 @@ hal::log::info "Session log:       ${_BROW_LOG}"
 # Determine accept header and handle templated start link
 accept="$_BROW_HAL_ACCEPT"
 start_url="$_BROW_START_URL"
+_BROW_LAST_BINDINGS=()
 
 if [[ -n "$_BROW_START_LINK_JSON" ]]; then
     accept=$(_brow_accept_for_link "$_BROW_START_LINK_JSON")
     local_templated=$(_brow_qr "$_BROW_START_LINK_JSON" '.templated // false')
     if [[ "$local_templated" == "true" ]]; then
-        _brow_log_comment "Expand starting URI template"
-        printf '_template=%s\n' "$(printf '%q' "$_BROW_START_URL")" >> "$_BROW_LOG"
         start_url=$(_brow_expand_vars "$_BROW_START_URL" "start")
     fi
 fi
 
-# Log the initial request
-_brow_log_comment "Initial GET"
-printf '_link=%s\n' "$(printf '%q' "$start_url")" >> "$_BROW_LOG"
-
 # Send the initial request
 _brow_do_request "GET" "$start_url" "$accept"
+
+# Log the initial step, reproducing the original nahal.sh invocation: a bare GET
+# for a URL start, or hallink.sh (--link for a link/file start) piped to GET --link.
+_brow_initial_cmd=""
+_brow_initial_hdr=""
+case "$_BROW_START_MODE" in
+    url)
+        _brow_initial_cmd="GET $(_brow_qargs "${_BROW_START_ARGS[@]}")"
+        _brow_initial_hdr="$(_brow_req_headers '{}')"
+        ;;
+    link)
+        _brow_initial_cmd="hallink.sh --link $(_brow_qargs "${_BROW_START_ARGS[@]}")"
+        [[ ${#_BROW_LAST_BINDINGS[@]} -gt 0 ]] && \
+            _brow_initial_cmd+=" $(_brow_qargs "${_BROW_LAST_BINDINGS[@]}")"
+        _brow_initial_cmd+=$'\n'"GET --link"
+        _brow_initial_hdr="$(_brow_req_headers "$_BROW_START_LINK_JSON")"
+        ;;
+    file)
+        _brow_initial_cmd="hallink.sh $(_brow_qargs "${_BROW_START_ARGS[@]}")"
+        [[ ${#_BROW_LAST_BINDINGS[@]} -gt 0 ]] && \
+            _brow_initial_cmd+=" $(_brow_qargs "${_BROW_LAST_BINDINGS[@]}")"
+        _brow_initial_cmd+=$'\n'"GET --link"
+        _brow_initial_hdr="$(_brow_req_headers "$_BROW_START_LINK_JSON")"
+        ;;
+esac
+_brow_log_step "$_brow_initial_hdr" "GET" "$_brow_initial_cmd" "initial request"
 
 # Classify and navigate the initial response
 _brow_ct=$(_brow_get_ct "${_BROW_OUTDIR}/${_BROW_LAST_BASE}.headers")
