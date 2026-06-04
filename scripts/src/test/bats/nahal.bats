@@ -607,6 +607,42 @@ _run_self_follow_session() {
     [ -f "${SESSION_DIR}/step_2.body" ]
 }
 
+# Passthrough HAL_LINK_PLUGIN: echoes the link JSON on stdin unchanged.  Returns
+# its absolute path so it can be both invoked and string-matched in session.sh.
+_make_pass_plugin() {
+    local p="${WORK_DIR}/$1"
+    printf '#!/usr/bin/env bash\ncat\n' > "$p"
+    chmod +x "$p"
+    printf '%s' "$p"
+}
+
+@test "session.sh: records the HAL_LINK_PLUGIN list and emits a replay check" {
+    local pass; pass=$(_make_pass_plugin pass.sh)
+    export HAL_LINK_PLUGIN="$pass"
+    _run_self_follow_session
+    local s="${SESSION_DIR}/session.sh"
+    grep -qF '. hal_utils.sh' "$s"                 # library sourced for hal::log::*
+    grep -qF '_check_plugins()' "$s"               # check function defined
+    grep -qF "$pass" "$s"                          # creation-time list recorded
+    grep -qE '^_check_plugins$' "$s"               # and invoked on replay
+}
+
+@test "session.sh replay: plugin diff logs OK / WARN / INFO" {
+    local keep gone fresh
+    keep=$(_make_pass_plugin keep.sh)
+    gone=$(_make_pass_plugin gone.sh)
+    fresh=$(_make_pass_plugin fresh.sh)
+    export HAL_LINK_PLUGIN="${keep}:${gone}"       # list at session creation
+    _run_self_follow_session
+    # Replay with a different list: keep stays, gone drops, fresh appears.
+    HAL_LINK_PLUGIN="${keep}:${fresh}" \
+        run --separate-stderr bash "${SESSION_DIR}/session.sh"
+    [ "$status" -eq 0 ]
+    [[ "$stderr" == *"plugin ${keep}"* ]]                  # OK   — in both
+    [[ "$stderr" == *"${gone} missing at replay"* ]]       # WARN — dropped
+    [[ "$stderr" == *"${fresh} new at replay"* ]]          # INFO — added
+}
+
 @test "live session: response files are renamed to predictable step names" {
     _run_self_follow_session
     [ -f "${SESSION_DIR}/step_1.body" ]

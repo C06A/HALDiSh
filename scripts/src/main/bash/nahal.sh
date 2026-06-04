@@ -1392,6 +1392,35 @@ _BROW_LOG="${_BROW_OUTDIR}/session.sh"
     printf '}\n'
     printf '\n'
     printf '_b=()   # response base name captured per step\n'
+    # Record the HAL_LINK_PLUGIN list as it stood at session creation, then emit
+    # a check that diffs it against the list present at replay time.
+    printf '\n. hal_utils.sh   # hal::log::* for _check_plugins\n'
+    printf '_plugins_created=%q\n' "${HAL_LINK_PLUGIN:-}"
+    cat <<'_NAHAL_PLUGIN_CHECK'
+
+# Plugin list check: compare HAL_LINK_PLUGIN at replay against the list recorded
+# when this session was created.  OK = present in both, INFO = new at replay,
+# WARN = recorded plugin missing at replay.
+_check_plugins() {
+    local -a _was=() _now=(); local _p
+    [ -n "$_plugins_created" ]      && IFS=: read -ra _was <<< "$_plugins_created"
+    [ -n "${HAL_LINK_PLUGIN:-}" ]   && IFS=: read -ra _now <<< "${HAL_LINK_PLUGIN:-}"
+    for _p in "${_was[@]+"${_was[@]}"}"; do
+        [ -z "$_p" ] && continue
+        if printf '%s\n' "${_now[@]+"${_now[@]}"}" | grep -qxF -- "$_p"; then
+            hal::log::ok   "plugin $_p"
+        else
+            hal::log::warn "plugin $_p missing at replay"
+        fi
+    done
+    for _p in "${_now[@]+"${_now[@]}"}"; do
+        [ -z "$_p" ] && continue
+        printf '%s\n' "${_was[@]+"${_was[@]}"}" | grep -qxF -- "$_p" \
+            || hal::log::info "plugin $_p new at replay"
+    done
+}
+_check_plugins
+_NAHAL_PLUGIN_CHECK
 } > "$_BROW_LOG"
 chmod +x "$_BROW_LOG"
 
