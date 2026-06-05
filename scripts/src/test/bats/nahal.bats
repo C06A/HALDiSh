@@ -590,6 +590,7 @@ _run_self_follow_session() {
     grep -qF '_b[1]=$(' "$s"                     # initial captured as _b[1]
     grep -qF 'HTTP_IN_HEADERS="Accept:' "$s"     # header inline on the method
     grep -qF 'rename.sh -p step_' "$s"           # prefix-mode rename
+    grep -qF '# follow links self' "$s"          # step comment carries the full path
     grep -qF 'hallink.sh "${_b[1]}.body" links self' "$s"  # follow reads _b[1]
     grep -qF 'GET --link' "$s"                   # method consumes the link
     grep -qF '_b[2]=$(' "$s"                     # follow captured as _b[2]
@@ -670,6 +671,7 @@ _make_pass_plugin() {
     local s
     s=$(ls -d "${WORK_DIR}"/nahal_*/session.sh | head -1)
     grep -qF 'hallink.sh "${_b[1]}.body" links search term=hello' "$s"
+    grep -qF '# follow links search term=hello' "$s"   # path + binding in the comment
 }
 
 @test "interactive: follow a link, choose POST from the menu with no body" {

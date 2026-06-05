@@ -44,11 +44,11 @@ All scripts live in `scripts/src/main/bash/`. Tests live in `scripts/src/test/ba
 | `halprepend.sh` | Prepend a base string to a HAL link object's `href`. Two modes: `--link <obj>` or `<file> <hal-path>`. Format-preserving (JSON/YAML/XML). |
 | `httpreq.sh` | HTTP dispatcher. Invoked via method-named hardlinks (`GET`, `POST`, …) that all point to `.httpreq.sh`. Outputs a family of files: `<base>.body`, `<base>.headers`, `<base>.code`, `<base>.curl`, etc. |
 | `uritemplate.sh` | RFC 6570 URI template expansion. Called as a subprocess by `hal.sh` and `hallink.sh`. |
-| `nahal.sh` | Interactive HAL API browser. Fetches URLs using `httpreq.sh`, classifies responses by Content-Type, and navigates via `hal.sh`. Logs a replayable `session.sh`. |
+| `nahal.sh` | Interactive HAL API browser. Fetches with the method commands, classifies responses by Content-Type, and navigates links/embeddeds/properties/docs — and arrays of resources — via `hal.sh`. Follows links with any HTTP method (HEAD/custom verbs via an on-demand `./<METHOD>` link). Renames each response via `rename.sh -p <prefix>` (user prefix from `-p` or a prompt) and logs a re-runnable `session.sh` whose steps capture each base into a `_b[]` array — `_b[N]=$(hallink.sh "${_b[M]}.body" … \| <METHOD> --link \| rename.sh -p <prefix>)` — with the header as a command-prefix on the method (no grouping subshells). Records the `HAL_LINK_PLUGIN` list at session creation and emits a `_check_plugins` that diffs it against the replay-time list (OK = in both, INFO = new, WARN = missing). |
 | `menu.sh` | Single-keypress interactive selector. Reads from fd 3 (`_MENU_TTY` env var overrides). |
 | `prettyprint.sh` | Detects content type of `<base>.body` and reformats it as JSON/YAML/XML. |
 | `adoc.sh` | Wraps file groups into AsciiDoc tagged regions for inclusion in docs. |
-| `rename.sh` | Renames a group of files sharing a base name across all extensions. |
+| `rename.sh` | Renames a group of files sharing a base name across all extensions. `-p <prefix>` mode auto-numbers the new base as `<prefix><N>` (one past the largest existing `<prefix><N>.*`). |
 | `validate.sh` | Integrity checker: verifies SHA-256 hashes against `.hal_manifest`. Called by `env.sh`. |
 | `setup.sh` | Post-install: renames `httpreq.sh` → `.httpreq.sh`, creates method hardlinks, generates `.hal_manifest`. |
 

@@ -31,6 +31,14 @@
 #   _b[N]=$(hallink.sh "${_b[M]}.body" <path> | <METHOD> --link | rename.sh -p <prefix>)
 # Replaying it requires the HALDiSh environment on PATH (source env.sh).
 #
+# Link plugins (HAL_LINK_PLUGIN): a colon-separated list of scripts that each
+# link object is piped through before it is followed.  Each plugin reads the
+# current link JSON on stdin, receives the resource file and HAL path as args,
+# and must print the updated link JSON (with .href) to stdout (see
+# _hal_run_plugins in hal_utils.sh).  The plugin list in effect at session
+# creation is recorded in session.sh, which on replay diffs it against the list
+# present then: OK = in both, INFO = new at replay, WARN = missing at replay.
+#
 # Requires: curl, and yq (mikefarah/yq v4) or jq (JSON only)
 # =============================================================================
 set -euo pipefail
@@ -776,8 +784,13 @@ _brow_follow_link() {
     invoke=$(_brow_invoke_name "$method")
     local req_cmd="${src_cmd}"$'\n'"${invoke} --link"
     [[ ${#body_args[@]} -gt 0 ]] && req_cmd+=" $(_brow_qargs "${body_args[@]}")"
+    # Label the step with the whole HAL path to the link (including any embeddeds
+    # segments traversed to reach it) plus the var=value bindings used to expand
+    # the template, e.g. "follow embeddeds orders 0 links search term=hat".
+    local _label="follow ${halpath[*]}"
+    [[ ${#_BROW_LAST_BINDINGS[@]} -gt 0 ]] && _label+=" ${_BROW_LAST_BINDINGS[*]}"
     _brow_log_step "$(_brow_req_headers "$link_json" ${body_args[@]+"${body_args[@]}"})" \
-        "$invoke" "$req_cmd" "follow '${rel}'"
+        "$invoke" "$req_cmd" "$_label"
 
     local status ct cls
     status=$(cat "${_BROW_OUTDIR}/${_BROW_LAST_BASE}.status" 2>/dev/null || printf '0')
@@ -1468,7 +1481,11 @@ case "$_BROW_START_MODE" in
         _brow_initial_hdr="$(_brow_req_headers "$_BROW_START_LINK_JSON")"
         ;;
 esac
-_brow_log_step "$_brow_initial_hdr" "GET" "$_brow_initial_cmd" "initial request"
+# Append any template bindings used to expand a templated start link.
+_brow_initial_label="initial request"
+[[ ${#_BROW_LAST_BINDINGS[@]} -gt 0 ]] && \
+    _brow_initial_label+=" ${_BROW_LAST_BINDINGS[*]}"
+_brow_log_step "$_brow_initial_hdr" "GET" "$_brow_initial_cmd" "$_brow_initial_label"
 
 # Classify and navigate the initial response
 _brow_ct=$(_brow_get_ct "${_BROW_OUTDIR}/${_BROW_LAST_BASE}.headers")
