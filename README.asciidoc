@@ -1100,8 +1100,8 @@ groups.
 
 [source,bash]
 ----
-adoc.sh [-a <file>] <base>...
-printf "base1\nbase2\n" | adoc.sh [-a <file>]
+adoc.sh [-a <file>] [<base>...] [-- <ext>...]
+printf "base1\nbase2\n" | adoc.sh [-a <file>] [-- <ext>...]
 ----
 
 [cols="1,3",options="header"]
@@ -1113,6 +1113,15 @@ printf "base1\nbase2\n" | adoc.sh [-a <file>]
 stdout.  In this mode the base name of each processed group is printed to
 stdout (for piping into further tools).  If `<file>` does not yet exist or is
 empty, a document header is prepended automatically.
+
+|`-- <ext>...`
+|Extension filter: everything after `--` is a list of extensions to document
+(for example `-- body headers` emits only `<base>.body` and `<base>.headers`).
+A leading dot is optional (`body` and `.body` are equivalent).  With no `--`
+(or a bare `--` with nothing after it) every extension is documented.  Files
+are always emitted in glob (sorted) order, regardless of the order the
+extensions are listed.  A requested extension with no matching `<base>.<ext>`
+file logs a warning (per base) to stderr but does not change the exit status.
 |===
 
 === Output format
@@ -1120,7 +1129,8 @@ empty, a document header is prepended automatically.
 For each base name, `adoc.sh` finds all files matching `<base>.*` in the
 current directory and emits a level-2 heading for the group, a level-3 heading
 for each file, and a source block wrapping the file content between
-`// tag::<filename>[]` and `// end::<filename>[]` markers.
+`// tag::<filename>[]` and `// end::<filename>[]` markers.  When an extension
+filter is given (after `--`), only the matching files are emitted.
 
 === stdin / stdout / exit codes
 
@@ -1129,19 +1139,21 @@ for each file, and a source block wrapping the file content between
 |Channel |Content
 
 |stdin
-|Base names (one per line) when none are given as arguments.
+|Base names (one per line) when none are given as arguments before `--`.
 
 |stdout
 |AsciiDoc text (default mode) or base name per group (`-a` mode).
 
 |stderr
-|Not used for normal output.
+|Warnings for requested extensions that match no file (extension-filter mode).
 
 |Exit 0
-|All groups processed successfully.
+|All groups processed successfully (including when a requested extension
+matched no file — that only warns).
 
 |Exit 1
-|`-a` specified without a filename argument.
+|`-a` specified without a filename argument, or no base names from either the
+arguments or stdin.
 |===
 
 === Including regions in documentation

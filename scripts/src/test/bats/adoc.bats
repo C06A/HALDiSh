@@ -208,3 +208,82 @@ _adoc() {
     [[ "$output" == *'// tag::foo.body[]'* ]]
     [[ "$output" == *'// end::foo.body[]'* ]]
 }
+
+# ── extension filter ──────────────────────────────────────────────────────────
+
+@test "adoc: filter after -- emits only the listed extensions" {
+    printf 'B' > "${WORK_DIR}/req.body"
+    printf 'H' > "${WORK_DIR}/req.headers"
+    printf 'C' > "${WORK_DIR}/req.curl"
+    _adoc req -- body headers
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'// tag::req.body[]'* ]]
+    [[ "$output" == *'// tag::req.headers[]'* ]]
+    ! [[ "$output" == *'req.curl'* ]]
+}
+
+@test "adoc: a leading dot on an extension is optional" {
+    printf 'B' > "${WORK_DIR}/req.body"
+    printf 'H' > "${WORK_DIR}/req.headers"
+    _adoc req -- .body .headers
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'// tag::req.body[]'* ]]
+    [[ "$output" == *'// tag::req.headers[]'* ]]
+}
+
+@test "adoc: no -- documents every extension (unchanged)" {
+    printf 'B' > "${WORK_DIR}/req.body"
+    printf 'C' > "${WORK_DIR}/req.curl"
+    _adoc req
+    [[ "$output" == *'req.body'* ]]
+    [[ "$output" == *'req.curl'* ]]
+}
+
+@test "adoc: a bare -- with no extensions documents everything" {
+    printf 'B' > "${WORK_DIR}/req.body"
+    printf 'C' > "${WORK_DIR}/req.curl"
+    _adoc req --
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'req.body'* ]]
+    [[ "$output" == *'req.curl'* ]]
+}
+
+@test "adoc: warns per base for a requested extension with no file, exit 0" {
+    printf 'B' > "${WORK_DIR}/req.body"
+    run --separate-stderr bash -c "cd '${WORK_DIR}' && bash '${ADOC_SH}' req -- body xml"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'// tag::req.body[]'* ]]
+    [[ "$stderr" == *'req has no .xml'* ]]
+}
+
+@test "adoc: a base missing one of several listed extensions still warns only for it" {
+    printf 'B1' > "${WORK_DIR}/req1.body"
+    printf 'H1' > "${WORK_DIR}/req1.headers"
+    printf 'B2' > "${WORK_DIR}/req2.body"
+    run --separate-stderr bash -c "cd '${WORK_DIR}' && bash '${ADOC_SH}' req1 req2 -- body headers"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'// tag::req1.body[]'* ]]
+    [[ "$output" == *'// tag::req1.headers[]'* ]]
+    [[ "$output" == *'// tag::req2.body[]'* ]]
+    [[ "$stderr" == *'req2 has no .headers'* ]]
+    ! [[ "$stderr" == *'req1 has no'* ]]
+}
+
+@test "adoc: base names from stdin combine with a -- filter" {
+    printf 'B' > "${WORK_DIR}/req.body"
+    printf 'C' > "${WORK_DIR}/req.curl"
+    run bash -c "cd '${WORK_DIR}' && printf 'req\n' | bash '${ADOC_SH}' -- curl"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'// tag::req.curl[]'* ]]
+    ! [[ "$output" == *'req.body'* ]]
+}
+
+@test "adoc: filter warnings go to stderr, not into the -a output file" {
+    printf 'B' > "${WORK_DIR}/req.body"
+    local out="${WORK_DIR}/out.adoc"
+    run --separate-stderr bash -c "cd '${WORK_DIR}' && bash '${ADOC_SH}' -a '${out}' req -- body xml"
+    [ "$status" -eq 0 ]
+    grep -q 'tag::req.body' "$out"
+    ! grep -q 'has no .xml' "$out"
+    [[ "$stderr" == *'req has no .xml'* ]]
+}

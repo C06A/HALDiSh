@@ -3,8 +3,8 @@
 # adoc.sh — emit AsciiDoc tagged regions from grouped files
 #
 # Usage:
-#   adoc.sh [-a <file>] <base>...
-#   printf "base1\nbase2\n" | adoc.sh [-a <file>]
+#   adoc.sh [-a <file>] [<base>...] [-- <ext>...]
+#   printf "base1\nbase2\n" | adoc.sh [-a <file>] [-- <ext>...]
 #
 # For each base name, finds all files matching <base>.* in the current
 # directory and wraps their content in AsciiDoc tagged regions:
@@ -12,6 +12,17 @@
 #   // tag::<filename-with-ext>[]
 #   <raw file content>
 #   // end::<filename-with-ext>[]
+#
+# Base names come from the positional arguments before "--"; when none are
+# given there, they are read from stdin (one per line).
+#
+# Extension filter: everything after "--" is a list of extensions to document
+# (e.g. "-- body headers" emits only <base>.body and <base>.headers).  A leading
+# dot is optional (body and .body are equivalent).  With no "--" (or a bare "--"
+# with nothing after it) all extensions are documented, as before.  Files are
+# emitted in glob (sorted) order regardless of the order extensions are listed.
+# A requested extension with no matching <base>.<ext> file warns (per base) but
+# does not change the exit status.
 #
 # Options:
 #   -a <file>   Append AsciiDoc content to <file> instead of stdout.
@@ -25,8 +36,8 @@
 set -euo pipefail
 
 _usage() {
-    printf 'Usage: %s [-a <file>] <base>...\n' "$(basename "$0")" >&2
-    printf '       printf "base1\\nbase2\\n" | %s [-a <file>]\n' "$(basename "$0")" >&2
+    printf 'Usage: %s [-a <file>] [<base>...] [-- <ext>...]\n' "$(basename "$0")" >&2
+    printf '       printf "base1\\nbase2\\n" | %s [-a <file>] [-- <ext>...]\n' "$(basename "$0")" >&2
 }
 
 . hal_utils.sh
@@ -44,26 +55,72 @@ if [[ $# -gt 0 && "$1" == '-a' ]]; then
 fi
 
 declare -a _bases=()
+declare -a _exts=()
 
-if [[ $# -gt 0 ]]; then
-    _bases=( "$@" )
-elif [[ ! -t 0 ]]; then
+# Split the remaining arguments at "--": bases before, extension filter after.
+while [[ $# -gt 0 ]]; do
+    if [[ "$1" == '--' ]]; then
+        shift
+        _exts=( "$@" )
+        break
+    fi
+    _bases+=( "$1" )
+    shift
+done
+
+# A leading dot on an extension is optional: .body and body are equivalent.
+for _i in "${!_exts[@]}"; do
+    _exts[_i]="${_exts[_i]#.}"
+done
+
+# No bases on the command line → read them from stdin (one per line).
+if [[ ${#_bases[@]} -eq 0 && ! -t 0 ]]; then
     while IFS= read -r _line; do
         [[ -z "$_line" ]] && continue
         _bases+=( "$_line" )
     done
-else
+fi
+
+# No bases and stdin is interactive (nothing piped) is a usage error; an empty
+# pipe just yields no work (exit 0, as before).
+if [[ ${#_bases[@]} -eq 0 && -t 0 ]]; then
     _usage; exit 1
 fi
 
 shopt -s nullglob
 
+# _emit <base>
+# Uses the global _exts[] array as an extension filter (empty = all extensions).
 _emit() {
     local base="$1"
     local files=( "${base}".* )
-    if [[ ${#files[@]} -gt 0 ]]; then
+
+    # With a filter, warn for every requested extension that has no <base>.<ext>.
+    if [[ ${#_exts[@]} -gt 0 ]]; then
+        local e
+        for e in "${_exts[@]}"; do
+            [[ -e "${base}.${e}" ]] || hal::log::warn "${base} has no .${e}" >&2
+        done
+    fi
+
+    # Select the files to emit, keeping glob (sorted) order.  No filter → all.
+    local -a sel=()
+    local f
+    for f in ${files[@]+"${files[@]}"}; do
+        if [[ ${#_exts[@]} -eq 0 ]]; then
+            sel+=( "$f" )
+        else
+            local ext="${f#"${base}".}" e keep=0
+            for e in "${_exts[@]}"; do
+                [[ "$ext" == "$e" ]] && { keep=1; break; }
+            done
+            [[ $keep -eq 1 ]] && sel+=( "$f" )
+        fi
+    done
+
+    if [[ ${#sel[@]} -gt 0 ]]; then
         printf '== %s\n\n' "$base"
-        for f in "${files[@]}"; do
+        for f in "${sel[@]}"; do
             printf '=== %s\n\n' "$f"
             printf '[source]\n----\n'
             printf '// tag::%s[]\n' "$f"
