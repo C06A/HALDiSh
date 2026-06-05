@@ -19,9 +19,6 @@ SCRIPTS_DIR="$(pwd)/scripts/src/main/bash" \
 # Full build (assemble + test)
 ./gradlew :scripts:build
 
-# Convert README.asciidoc → README.md  (requires pandoc)
-./gradlew convertReadme
-
 # Install git hooks (run once after cloning)
 ./gradlew installGitHooks
 ```
