@@ -412,20 +412,25 @@ $HTTP_IN_HEADERS}" \
 # follow links orders
 _b[2]=$(
   hallink.sh "${_b[1]}.body" links orders \
-  | HTTP_IN_HEADERS="Accept:application/hal+json, …${HTTP_IN_HEADERS:+
-$HTTP_IN_HEADERS}" \
-  GET --link \
+  | GET --link \
   | rename.sh -p "$_prefix"
 )
 ----
 
 Each stage sits on its own indented line inside the `$(…)`, continued with `\`
-(a leading `|` after a bare newline is a Bash syntax error).  The header is a
-command-prefix on the method (a standalone assignment would not be exported to
-the piped command).  The base-name prefix is set once into `$_prefix` near the
-top of the script and referenced by every step's `rename.sh`.  `Accept` is set only when the link has no
-`type` (typed links get it from `--link`); a `Content-Type` is added for body
-requests; and `${HTTP_IN_HEADERS:+…}` preserves any preset the caller exported.
+(a leading `|` after a bare newline is a Bash syntax error).  The base-name
+prefix is set once into `$_prefix` near the top of the script and referenced by
+every step's `rename.sh`.  That prefix can be overridden when replaying: a
+`-p <prefix>` argument to `session.sh` wins, otherwise an exported
+`HAL_FILE_PREFIX` (a set-but-empty value is honored), otherwise the value
+recorded at session creation.  An unknown option or stray argument prints a
+usage message and exits `2`.  `HTTP_IN_HEADERS` is set only for headers the link
+cannot supply: `httpreq.sh` derives `Accept` from the link's `type` when a
+request is sent via `--link`, so the only `Accept` written is on the initial
+bare-URL `GET` (which has no link), and a `Content-Type` is added for body
+requests.  When present, the header is a command-prefix on the method (a
+standalone assignment would not be exported to the piped command), and
+`${HTTP_IN_HEADERS:+…}` preserves any preset the caller exported.
 The replay begins with a bootstrap that activates the HALDiSh environment
 automatically: it uses the toolkit if already on `PATH`, otherwise sources
 `env.sh` from `$HAL_LIB_DIR` or the default install location
@@ -447,6 +452,10 @@ nahal.sh -p req response.body links self
 
 # Replay a recorded session (it self-activates the HALDiSh environment)
 bash nahal_20260603T185734/session.sh
+
+# Replay but rename the responses with a different prefix
+bash nahal_20260603T185734/session.sh -p rerun_
+HAL_FILE_PREFIX=rerun_ bash nahal_20260603T185734/session.sh
 ----
 
 

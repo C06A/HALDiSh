@@ -461,6 +461,30 @@ _src() {
     rm -rf "$d"
 }
 
+# ── request headers (replay) ──────────────────────────────────────────────────
+
+@test "_brow_req_headers: no header for a GET on a typed link" {
+    _src '_brow_req_headers "{\"href\":\"/x\",\"type\":\"application/hal+json\"}"'
+    [ -z "$output" ]
+}
+
+@test "_brow_req_headers: no header for a GET on an untyped link (Accept comes from the link)" {
+    _src '_brow_req_headers "{\"href\":\"/x\"}"'
+    [ -z "$output" ]
+}
+
+@test "_brow_req_headers: a JSON body yields Content-Type only, never Accept" {
+    _src '_brow_req_headers "{\"href\":\"/x\"}" -a "{\"k\":1}"'
+    [[ "$output" == *"Content-Type:application/json"* ]]
+    [[ "$output" != *"Accept:"* ]]
+}
+
+@test "_brow_req_headers: a urlencoded body yields the form Content-Type, never Accept" {
+    _src '_brow_req_headers "{\"href\":\"/x\"}" -u "a=1"'
+    [[ "$output" == *"Content-Type:application/x-www-form-urlencoded"* ]]
+    [[ "$output" != *"Accept:"* ]]
+}
+
 @test "_brow_log_step: custom method, inline header, array capture, prefix rename" {
     run bash -c '
         source "$1" >/dev/null 2>&1 || true
@@ -593,7 +617,10 @@ _run_self_follow_session() {
     grep -qF '_ensure_method()' "$s"            # custom-method helper in header
     grep -qF '_b=()' "$s"                        # response-base array initialised
     grep -qF '_b[1]=$(' "$s"                     # initial captured as _b[1]
-    grep -qF 'HTTP_IN_HEADERS="Accept:' "$s"     # header inline on the method
+    grep -qF 'HTTP_IN_HEADERS="Accept:' "$s"     # Accept set on the initial bare-URL GET
+    # Accept is set once, only on the initial bare-URL GET; the --link follow
+    # gets its Accept from the link via httpreq.sh, so no HTTP_IN_HEADERS there.
+    [ "$(grep -c 'HTTP_IN_HEADERS=' "$s")" -eq 1 ]
     grep -qF '_prefix=step_' "$s"                # prefix set once in the header
     grep -qF 'rename.sh -p "$_prefix"' "$s"      # each step renames via the variable
     ! grep -qF 'rename.sh -p step_' "$s"         # not hardcoded per request
@@ -613,6 +640,69 @@ _run_self_follow_session() {
     [ "$status" -eq 0 ]
     [ -f "${SESSION_DIR}/step_1.body" ]
     [ -f "${SESSION_DIR}/step_2.body" ]
+}
+
+# ── session.sh prefix override (-p / HAL_FILE_PREFIX) ─────────────────────────
+# _run_self_follow_session bakes the prefix "step_" into the session.
+
+@test "session.sh: -p overrides the baked prefix" {
+    _run_self_follow_session
+    run bash "${SESSION_DIR}/session.sh" -p over_
+    [ "$status" -eq 0 ]
+    [ -f "${SESSION_DIR}/over_1.body" ]
+    [ -f "${SESSION_DIR}/over_2.body" ]
+}
+
+@test "session.sh: HAL_FILE_PREFIX overrides the baked prefix" {
+    _run_self_follow_session
+    run env HAL_FILE_PREFIX=envp_ bash "${SESSION_DIR}/session.sh"
+    [ "$status" -eq 0 ]
+    [ -f "${SESSION_DIR}/envp_1.body" ]
+    [ -f "${SESSION_DIR}/envp_2.body" ]
+}
+
+@test "session.sh: -p beats HAL_FILE_PREFIX" {
+    _run_self_follow_session
+    run env HAL_FILE_PREFIX=envp_ bash "${SESSION_DIR}/session.sh" -p cli_
+    [ "$status" -eq 0 ]
+    [ -f "${SESSION_DIR}/cli_1.body" ]
+    [ ! -f "${SESSION_DIR}/envp_1.body" ]
+}
+
+@test "session.sh: no override keeps the baked prefix" {
+    _run_self_follow_session
+    run bash "${SESSION_DIR}/session.sh"
+    [ "$status" -eq 0 ]
+    [ -f "${SESSION_DIR}/step_1.body" ]
+}
+
+@test "session.sh: an empty -p override yields an unprefixed base" {
+    _run_self_follow_session
+    run bash "${SESSION_DIR}/session.sh" -p ''
+    [ "$status" -eq 0 ]
+    [ -f "${SESSION_DIR}/1.body" ]
+    [ -f "${SESSION_DIR}/2.body" ]
+}
+
+@test "session.sh: a set-but-empty HAL_FILE_PREFIX yields an unprefixed base" {
+    _run_self_follow_session
+    run env HAL_FILE_PREFIX='' bash "${SESSION_DIR}/session.sh"
+    [ "$status" -eq 0 ]
+    [ -f "${SESSION_DIR}/1.body" ]
+}
+
+@test "session.sh: an unknown option errors with usage and exits 2" {
+    _run_self_follow_session
+    run bash "${SESSION_DIR}/session.sh" -x
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"usage: session.sh [-p <prefix>]"* ]]
+}
+
+@test "session.sh: a stray positional errors with usage and exits 2" {
+    _run_self_follow_session
+    run bash "${SESSION_DIR}/session.sh" extra
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"usage:"* ]]
 }
 
 @test "session.sh: header contains the HALDiSh bootstrap" {

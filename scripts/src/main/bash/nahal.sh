@@ -717,24 +717,18 @@ _brow_qargs() {
     printf '%s' "$out"
 }
 
-# _brow_req_headers <link_json> <body-flag...>  → header lines for the replay
-# Accept is added only when the link has no type (typed links get Accept from
-# `--link`); a Content-Type line is added for body requests.  Lines are
+# _brow_req_headers [link_json] <body-flag...>  → non-Accept header lines for the
+# replay.  Accept is NOT emitted here: when a request is sent via `--link`,
+# httpreq.sh derives Accept from the link's `type`, so repeating it in
+# HTTP_IN_HEADERS would be redundant.  Only headers the link cannot supply are
+# emitted — currently a Content-Type for body requests.  The leading link_json
+# argument is accepted for call-site symmetry but no longer inspected.  Lines are
 # newline-separated, as httpreq.sh expects in HTTP_IN_HEADERS.
 _brow_req_headers() {
-    local link_json="$1"; shift
-    local t hdr=''
-    t=$(_brow_qkr "$link_json" 'type' 2>/dev/null || printf '')
-    [[ -z "$t" || "$t" == null ]] && hdr="Accept:${_BROW_HAL_ACCEPT}"
-    local ct
+    shift || true   # discard the (now unused) link_json argument
+    local ct hdr=''
     ct=$(_brow_infer_content_type "$@")
-    if [[ -n "$ct" ]]; then
-        if [[ -n "$hdr" ]]; then
-            hdr="${hdr}"$'\n'"Content-Type:${ct}"
-        else
-            hdr="Content-Type:${ct}"
-        fi
-    fi
+    [[ -n "$ct" ]] && hdr="Content-Type:${ct}"
     printf '%s' "$hdr"
 }
 
@@ -1408,9 +1402,25 @@ _BROW_LOG="${_BROW_OUTDIR}/session.sh"
     printf '# Starting URL: %s\n' "$_BROW_START_URL"
     printf '# Run from:     %s\n' "$_BROW_OUTDIR"
     printf '# Activates the HALDiSh environment automatically (see bootstrap below).\n'
+    printf '# Override the response-file prefix: -p <prefix> (highest), else\n'
+    printf '# $HAL_FILE_PREFIX, else the value recorded at session creation.\n'
     printf 'set -euo pipefail\n'
     printf 'cd "$(dirname "$0")"\n'
     printf '\n'
+    cat <<'_NAHAL_ARGS'
+# ── arguments ─────────────────────────────────────────────────────────────────
+# -p <prefix> overrides the response-file base-name prefix for this replay.
+_cli_prefix_set=0 _cli_prefix=''
+while getopts ':p:' _opt; do
+    case "$_opt" in
+        p) _cli_prefix=$OPTARG; _cli_prefix_set=1 ;;
+        *) printf 'session.sh: usage: session.sh [-p <prefix>]\n' >&2; exit 2 ;;
+    esac
+done
+shift $(( OPTIND - 1 ))
+[ $# -gt 0 ] && { printf 'session.sh: usage: session.sh [-p <prefix>]\n' >&2; exit 2; }
+
+_NAHAL_ARGS
     cat <<'_NAHAL_BOOTSTRAP'
 # ── HALDiSh bootstrap ─────────────────────────────────────────────────────────
 # Make the toolkit available: use it if already active, otherwise source env.sh
@@ -1449,7 +1459,11 @@ _NAHAL_BOOTSTRAP
     printf '}\n'
     printf '\n'
     printf '_b=()   # response base name captured per step\n'
-    printf '_prefix=%q   # response-file base-name prefix passed to rename.sh\n' "$_BROW_PREFIX"
+    # Resolve the response-file prefix: the baked value is the default; an exported
+    # HAL_FILE_PREFIX overrides it (set-but-empty is honored); -p overrides both.
+    printf '_prefix=%q   # prefix recorded at session creation (default)\n' "$_BROW_PREFIX"
+    printf '[ "${HAL_FILE_PREFIX+x}" = x ] && _prefix=$HAL_FILE_PREFIX\n'
+    printf '[ "$_cli_prefix_set" -eq 1 ]   && _prefix=$_cli_prefix\n'
     # Record the HAL_LINK_PLUGIN list as it stood at session creation, then emit
     # a check that diffs it against the list present at replay time.  hal::log::*
     # is already loaded by the bootstrap above.
@@ -1509,7 +1523,9 @@ _brow_initial_hdr=""
 case "$_BROW_START_MODE" in
     url)
         _brow_initial_cmd="GET $(_brow_qargs "${_BROW_START_ARGS[@]}")"
-        _brow_initial_hdr="$(_brow_req_headers '{}')"
+        # Bare URL GET — there is no link for httpreq.sh to read Accept from, so
+        # request a HAL response explicitly (this is the one place we set Accept).
+        _brow_initial_hdr="Accept:${_BROW_HAL_ACCEPT}"
         ;;
     link)
         _brow_initial_cmd="hallink.sh --link $(_brow_qargs "${_BROW_START_ARGS[@]}")"
