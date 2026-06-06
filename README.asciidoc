@@ -399,23 +399,38 @@ viewed in, and so re-running keeps appending (`<prefix>N+1`, …) without clobbe
 [source,bash]
 ----
 _b=()
+_prefix=req   # response-file base-name prefix, set once and reused below
 
 # initial request
-_b[1]=$(HTTP_IN_HEADERS="Accept:application/hal+json, …${HTTP_IN_HEADERS:+
-$HTTP_IN_HEADERS}" GET http://api.example.com/ \
-  | rename.sh -p req)
+_b[1]=$(
+  HTTP_IN_HEADERS="Accept:application/hal+json, …${HTTP_IN_HEADERS:+
+$HTTP_IN_HEADERS}" \
+  GET http://api.example.com/ \
+  | rename.sh -p "$_prefix"
+)
 
-# follow 'orders'
-_b[2]=$(hallink.sh "${_b[1]}.body" links orders \
-  | GET --link \
-  | rename.sh -p req)
+# follow links orders
+_b[2]=$(
+  hallink.sh "${_b[1]}.body" links orders \
+  | HTTP_IN_HEADERS="Accept:application/hal+json, …${HTTP_IN_HEADERS:+
+$HTTP_IN_HEADERS}" \
+  GET --link \
+  | rename.sh -p "$_prefix"
+)
 ----
 
-The header is a command-prefix on the method (a standalone assignment would not
-be exported to the piped command).  `Accept` is set only when the link has no
+Each stage sits on its own indented line inside the `$(…)`, continued with `\`
+(a leading `|` after a bare newline is a Bash syntax error).  The header is a
+command-prefix on the method (a standalone assignment would not be exported to
+the piped command).  The base-name prefix is set once into `$_prefix` near the
+top of the script and referenced by every step's `rename.sh`.  `Accept` is set only when the link has no
 `type` (typed links get it from `--link`); a `Content-Type` is added for body
 requests; and `${HTTP_IN_HEADERS:+…}` preserves any preset the caller exported.
-Replaying requires the HALDiSh environment on `PATH` — run `source env.sh` first.
+The replay begins with a bootstrap that activates the HALDiSh environment
+automatically: it uses the toolkit if already on `PATH`, otherwise sources
+`env.sh` from `$HAL_LIB_DIR` or the default install location
+(`~/.local/lib/haldish`); if neither is found it prints installation
+instructions and exits.
 
 === Examples
 
@@ -430,8 +445,7 @@ nahal.sh -p req https://api.example.com/
 # Start from the "self" link extracted from a saved response
 nahal.sh -p req response.body links self
 
-# Replay a recorded session
-source env.sh
+# Replay a recorded session (it self-activates the HALDiSh environment)
 bash nahal_20260603T185734/session.sh
 ----
 

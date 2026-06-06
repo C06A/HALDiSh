@@ -472,12 +472,17 @@ _src() {
         cat "$2"
     ' _ "$NAHAL_SH" "${WORK_DIR}/log"
     [[ "$output" == *"_ensure_method HEAD"* ]]
-    [[ "$output" == *'_b[3]=$('* ]]
     [[ "$output" == *'HTTP_IN_HEADERS="Accept:x'* ]]
     [[ "$output" == *"./HEAD --link"* ]]
-    [[ "$output" == *"rename.sh -p req"* ]]
+    [[ "$output" == *'rename.sh -p "$_prefix"'* ]]   # prefix via the shared variable
     [[ "$output" == *'${_b[2]}.body'* ]]
     [[ "$output" != *"(HTTP_IN_HEADERS"* ]]
+    # Multi-line layout: "$(" opens its own line, ")" closes its own line, and
+    # the piped/continued stages are indented.
+    [[ "$output" == *$'_b[3]=$(\n'* ]]
+    [[ "$output" == *$'\n)'* ]]
+    [[ "$output" == *$'\n  hallink.sh "${_b[2]}.body" links self \\\n'* ]]
+    [[ "$output" == *$'\n  | rename.sh -p "$_prefix"\n'* ]]
 }
 
 # ── documentation (CURIE) ─────────────────────────────────────────────────────
@@ -589,7 +594,9 @@ _run_self_follow_session() {
     grep -qF '_b=()' "$s"                        # response-base array initialised
     grep -qF '_b[1]=$(' "$s"                     # initial captured as _b[1]
     grep -qF 'HTTP_IN_HEADERS="Accept:' "$s"     # header inline on the method
-    grep -qF 'rename.sh -p step_' "$s"           # prefix-mode rename
+    grep -qF '_prefix=step_' "$s"                # prefix set once in the header
+    grep -qF 'rename.sh -p "$_prefix"' "$s"      # each step renames via the variable
+    ! grep -qF 'rename.sh -p step_' "$s"         # not hardcoded per request
     grep -qF '# follow links self' "$s"          # step comment carries the full path
     grep -qF 'hallink.sh "${_b[1]}.body" links self' "$s"  # follow reads _b[1]
     grep -qF 'GET --link' "$s"                   # method consumes the link
@@ -606,6 +613,27 @@ _run_self_follow_session() {
     [ "$status" -eq 0 ]
     [ -f "${SESSION_DIR}/step_1.body" ]
     [ -f "${SESSION_DIR}/step_2.body" ]
+}
+
+@test "session.sh: header contains the HALDiSh bootstrap" {
+    _run_self_follow_session
+    local s="${SESSION_DIR}/session.sh"
+    grep -qF 'HALDiSh bootstrap' "$s"
+    grep -qF 'command -v hallink.sh' "$s"
+    grep -qF '.local/lib/haldish/env.sh' "$s"           # default install location
+    grep -qF 'HALDiSh toolkit not found' "$s"           # install instructions
+}
+
+@test "session.sh: bootstrap prints install instructions and exits when HALDiSh is absent" {
+    _run_self_follow_session
+    # Replay with the toolkit off PATH, no HAL_LIB_DIR, and an empty HOME so the
+    # default install location does not resolve either.
+    run env -u HAL_LIB_DIR PATH="/usr/bin:/bin" HOME="${WORK_DIR}/nohome" \
+        bash "${SESSION_DIR}/session.sh"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"HALDiSh toolkit not found"* ]]
+    [[ "$output" == *".local/lib/haldish"* ]]
+    [[ "$output" == *"releases"* ]]
 }
 
 # Passthrough HAL_LINK_PLUGIN: echoes the link JSON on stdin unchanged.  Returns

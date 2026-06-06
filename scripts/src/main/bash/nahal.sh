@@ -28,7 +28,8 @@
 # Each request's response files are renamed (via rename.sh -p) to <prefix><N>,
 # and the session is logged to <session-dir>/session.sh — a re-runnable script
 # whose steps capture each response base into an array:
-#   _b[N]=$(hallink.sh "${_b[M]}.body" <path> | <METHOD> --link | rename.sh -p <prefix>)
+#   _b[N]=$(hallink.sh "${_b[M]}.body" <path> | <METHOD> --link | rename.sh -p "$_prefix")
+# where $_prefix is set once near the top of the script.
 # Replaying it requires the HALDiSh environment on PATH (source env.sh).
 #
 # Link plugins (HAL_LINK_PLUGIN): a colon-separated list of scripts that each
@@ -257,12 +258,18 @@ _brow_hdr_value() {
 
 # _brow_log_step <header-lines> <invoke> <request-cmd> <label>
 # Appends one replay step: a custom-method link when <invoke> is ./<NAME>, then
-# the response capture
-#   _b[<N>]=$(<request stages> | rename.sh -p <prefix>)
-# The header (when any) is attached as a command-prefix on the method stage —
-# the last request stage — because a standalone assignment is not exported to the
-# piped command.  <request-cmd> holds the request stages newline-separated, e.g.
-# 'hallink.sh "${_b[1]}.body" links x'$'\n''GET --link'.
+# the response capture, laid out one stage per line inside a command
+# substitution:
+#   _b[<N>]=$(
+#     HTTP_IN_HEADERS="…" \
+#     <method> <args> \
+#     | rename.sh -p "$_prefix"
+#   )
+# The prefix is taken from the $_prefix variable set once in the session header.
+# The header (when any) is emitted as a leading, line-continued assignment on the
+# method stage — the last request stage — because a standalone assignment is not
+# exported to the piped command.  <request-cmd> holds the request stages
+# newline-separated, e.g. 'hallink.sh "${_b[1]}.body" links x'$'\n''GET --link'.
 _brow_log_step() {
     local hdr="$1" invoke="$2" cmd="$3" label="$4"
 
@@ -273,22 +280,28 @@ _brow_log_step() {
     local -a segs=()
     local line
     while IFS= read -r line; do segs+=("$line"); done <<< "$cmd"
-    # Attach the header to the method stage (the last request stage).
-    if [[ -n "$hdr" ]]; then
-        local _mi=$(( ${#segs[@]} - 1 ))
-        segs[_mi]="HTTP_IN_HEADERS=$(_brow_hdr_value "$hdr") ${segs[_mi]}"
-    fi
-    segs+=("rename.sh -p $(printf '%q' "$_BROW_PREFIX")")
+    # The method stage (which carries the header) is the last request stage.
+    local _method_idx=$(( ${#segs[@]} - 1 ))
+    segs+=('rename.sh -p "$_prefix"')   # _prefix is set once in the session header
 
-    # Emit the capture: first stage opens _b[N]=$( … ), the last closes it; every
-    # stage but the last ends with a "\" continuation; piped stages are "| "-led.
-    local i cont last=$(( ${#segs[@]} - 1 )) body
+    # Emit the capture: "$(" opens on its own line, ")" closes on its own; each
+    # stage is indented, piped (after the first), and "\"-continued except the
+    # last.  The method stage's header is a separate, continued assignment line.
+    local i pipe last=$(( ${#segs[@]} - 1 ))
+    printf '_b[%s]=$(\n' "$_BROW_STEP" >> "$_BROW_LOG"
     for (( i = 0; i <= last; i++ )); do
-        body="${segs[i]}"
-        if (( i == 0 )); then body="_b[${_BROW_STEP}]=\$(${body}"; else body="  | ${body}"; fi
-        if (( i == last )); then body="${body})"; cont=''; else cont=' \'; fi
-        printf '%s%s\n' "$body" "$cont" >> "$_BROW_LOG"
+        (( i == 0 )) && pipe='' || pipe='| '
+        if (( i == _method_idx )) && [[ -n "$hdr" ]]; then
+            printf '  %sHTTP_IN_HEADERS=%s \\\n' "$pipe" "$(_brow_hdr_value "$hdr")" >> "$_BROW_LOG"
+            pipe=''   # the command continues the assignment line; no extra pipe
+        fi
+        if (( i == last )); then
+            printf '  %s%s\n' "$pipe" "${segs[i]}" >> "$_BROW_LOG"
+        else
+            printf '  %s%s \\\n' "$pipe" "${segs[i]}" >> "$_BROW_LOG"
+        fi
     done
+    printf ')\n' >> "$_BROW_LOG"
 }
 
 # ── method symlinks ───────────────────────────────────────────────────────────
@@ -1385,18 +1398,49 @@ _BROW_OUTDIR="$(pwd)/nahal_$(date +%Y%m%dT%H%M%S)"
 mkdir -p "$_BROW_OUTDIR"
 _BROW_LOG="${_BROW_OUTDIR}/session.sh"
 
-# Write session log header.  The replay requires the HALDiSh environment on
-# PATH (GET/POST/…, hallink.sh, rename.sh, uritemplate.sh) — source env.sh first.
-# _ensure_method recreates a custom-method link if the session dir was moved.
+# Write session log header.  The replay needs the HALDiSh environment (GET/POST/…,
+# hallink.sh, rename.sh, uritemplate.sh); the emitted bootstrap activates it (or
+# explains how to install it).  _ensure_method recreates a custom-method link if
+# the session dir was moved.
 {
     printf '#!/usr/bin/env bash\n'
     printf '# HAL Browse session — %s\n' "$(date)"
     printf '# Starting URL: %s\n' "$_BROW_START_URL"
     printf '# Run from:     %s\n' "$_BROW_OUTDIR"
-    printf '# Requires the HALDiSh environment on PATH (source env.sh).\n'
+    printf '# Activates the HALDiSh environment automatically (see bootstrap below).\n'
     printf 'set -euo pipefail\n'
     printf 'cd "$(dirname "$0")"\n'
     printf '\n'
+    cat <<'_NAHAL_BOOTSTRAP'
+# ── HALDiSh bootstrap ─────────────────────────────────────────────────────────
+# Make the toolkit available: use it if already active, otherwise source env.sh
+# from $HAL_LIB_DIR or the default install location.  If it cannot be found,
+# explain how to install it (default location ~/.local/lib/haldish) and exit.
+if ! command -v hallink.sh >/dev/null 2>&1; then
+    for _hal_env in "${HAL_LIB_DIR:-}/env.sh" "${HOME}/.local/lib/haldish/env.sh"; do
+        [ -f "$_hal_env" ] && { . "$_hal_env"; break; }
+    done
+fi
+if ! command -v hallink.sh >/dev/null 2>&1; then
+    cat >&2 <<'EOF'
+HALDiSh toolkit not found — it is required to replay this session.
+
+Install it (extracts to ~/.local/lib/haldish by default):
+
+  curl -LO https://github.com/C06A/HALDiSh/releases/latest/download/HALDiSh-<version>.run
+  bash HALDiSh-<version>.run
+
+Pick the latest <version> from https://github.com/C06A/HALDiSh/releases
+
+Then re-run this script, or activate the environment first:
+
+  source ~/.local/lib/haldish/env.sh
+EOF
+    exit 1
+fi
+. hal_utils.sh   # ensure hal::log::* are loaded (no-op if already sourced)
+
+_NAHAL_BOOTSTRAP
     printf '_ensure_method() {\n'
     printf '    command -v "$1" >/dev/null 2>&1 && return 0\n'
     printf '    [ -e "./$1" ] && return 0\n'
@@ -1405,10 +1449,11 @@ _BROW_LOG="${_BROW_OUTDIR}/session.sh"
     printf '}\n'
     printf '\n'
     printf '_b=()   # response base name captured per step\n'
+    printf '_prefix=%q   # response-file base-name prefix passed to rename.sh\n' "$_BROW_PREFIX"
     # Record the HAL_LINK_PLUGIN list as it stood at session creation, then emit
-    # a check that diffs it against the list present at replay time.
-    printf '\n. hal_utils.sh   # hal::log::* for _check_plugins\n'
-    printf '_plugins_created=%q\n' "${HAL_LINK_PLUGIN:-}"
+    # a check that diffs it against the list present at replay time.  hal::log::*
+    # is already loaded by the bootstrap above.
+    printf '\n_plugins_created=%q\n' "${HAL_LINK_PLUGIN:-}"
     cat <<'_NAHAL_PLUGIN_CHECK'
 
 # Plugin list check: compare HAL_LINK_PLUGIN at replay against the list recorded
