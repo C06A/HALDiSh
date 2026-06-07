@@ -534,6 +534,19 @@ CURI_RES='{"_links":{"self":{"href":"/r"},"curies":[{"name":"ex","href":"https:/
     [ "$output" = "https://ex.com/docs/widget" ]
 }
 
+@test "_brow_curi_link: returns the curie link with href expanded and templated false" {
+    _src 'links=$(_brow_qk "$1" _links); _brow_curi_link "$links" ex:widget' "$CURI_RES"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'"href":"https://ex.com/docs/widget"'* ]]   # template expanded
+    [[ "$output" == *'"name":"ex"'* ]]                           # curie object preserved
+    [[ "$output" == *'"templated":false'* ]]                     # no longer templated
+}
+
+@test "_brow_curi_link: returns non-zero when no curie defines the prefix" {
+    _src 'links=$(_brow_qk "$1" _links); _brow_curi_link "$links" zz:widget' "$CURI_RES"
+    [ "$status" -ne 0 ]
+}
+
 # ── interactive session smoke tests ───────────────────────────────────────────
 
 @test "interactive: GET a HAL resource then quit" {
@@ -589,6 +602,29 @@ CURI_RES='{"_links":{"self":{"href":"/r"},"curies":[{"name":"ex","href":"https:/
     [ "$output" = "https://ex.com/docs/widget" ]
 }
 
+@test "interactive: docs link is passed through HAL_LINK_PLUGIN before opening" {
+    # A plugin that prepends "PLUGIN:" to the link's href; proves the resolved
+    # curie doc link is run through HAL_LINK_PLUGIN before the browser is opened.
+    local plug="${WORK_DIR}/docplug.sh"
+    cat > "$plug" <<'PLUG'
+#!/usr/bin/env bash
+sed 's#"href":"#"href":"PLUGIN:#'
+PLUG
+    chmod +x "$plug"
+    export HAL_LINK_PLUGIN="$plug"
+    export MOCK_BODY='{"_links":{"self":{"href":"/api/r"},"curies":[{"name":"ex","href":"https://ex.com/docs/{rel}","templated":true}],"ex:widget":{"href":"/w"}},"title":"t"}'
+    export OPEN_LOG="${WORK_DIR}/opened"
+    _type_key '3'   # docs
+    _type_key '2'   # ex:widget
+    _type_key '1'   # back
+    _type_key '5'   # quit
+    run --separate-stderr bash -c 'cd "$2" && bash "$1" -p step_ http://example.com/api' \
+        _ "$NAHAL_SH" "$WORK_DIR"
+    [ "$status" -eq 0 ]
+    run cat "${OPEN_LOG}"
+    [ "$output" = "PLUGIN:https://ex.com/docs/widget" ]
+}
+
 @test "interactive: docs option is absent when no rel uses a curie prefix" {
     export MOCK_BODY='{"_links":{"self":{"href":"/api/r"},"curies":[{"name":"ex","href":"https://ex.com/docs/{rel}"}]},"title":"t"}'
     _type_key '3'   # links(1) properties(2) print(3) quit(4) — no docs; 3 = print
@@ -597,6 +633,92 @@ CURI_RES='{"_links":{"self":{"href":"/r"},"curies":[{"name":"ex","href":"https:/
         _ "$NAHAL_SH" "$WORK_DIR"
     [ "$status" -eq 0 ]
     [[ "$stderr" != *"docs"* ]]
+}
+
+# ── links menu: curies display mode (-c / NAHAL_CURIES) ───────────────────────
+
+# Resource with two curie prefixes (c1, c2): order is defined under both, report
+# only under c1.  Resource menu: links(1) properties(2) docs(3) print(4) quit(5).
+CURIE_LINKS_BODY='{"_links":{"self":{"href":"/api/r"},"curies":[{"name":"c1","href":"https://d/{rel}","templated":true},{"name":"c2","href":"https://d2/{rel}","templated":true}],"c1:order":{"href":"/o1"},"c2:order":{"href":"/o2"},"c1:report":{"href":"/rp"}},"title":"t"}'
+
+@test "links menu (default/without curies): shows local names, groups duplicates, hides curies" {
+    export MOCK_BODY="$CURIE_LINKS_BODY"
+    _type_key '1'   # links
+    _type_key '1'   # back
+    _type_key '5'   # quit
+    run --separate-stderr bash -c 'cd "$2" && bash "$1" -p step_ http://example.com/api' \
+        _ "$NAHAL_SH" "$WORK_DIR"
+    [ "$status" -eq 0 ]
+    [[ "$stderr" == *"order (c1, c2)"* ]]   # duplicate local name → grouped
+    [[ "$stderr" == *"report"* ]]           # single-match shown by local name
+    [[ "$stderr" != *"c1:order"* ]]         # full prefixed rels not shown
+    [[ "$stderr" != *"c1:report"* ]]
+}
+
+@test "links menu (-c on): shows full CURIE-prefixed rels" {
+    export MOCK_BODY="$CURIE_LINKS_BODY"
+    _type_key '1'   # links
+    _type_key '1'   # back
+    _type_key '5'   # quit
+    run --separate-stderr bash -c 'cd "$2" && bash "$1" -c on -p step_ http://example.com/api' \
+        _ "$NAHAL_SH" "$WORK_DIR"
+    [ "$status" -eq 0 ]
+    [[ "$stderr" == *"c1:order"* ]]
+    [[ "$stderr" == *"c2:order"* ]]
+    [[ "$stderr" == *"c1:report"* ]]
+    [[ "$stderr" != *"order (c1, c2)"* ]]
+}
+
+@test "links menu: -c overrides NAHAL_CURIES" {
+    export MOCK_BODY="$CURIE_LINKS_BODY"
+    _type_key '1'; _type_key '1'; _type_key '5'
+    run --separate-stderr bash -c 'cd "$2" && NAHAL_CURIES=off bash "$1" -c on -p step_ http://example.com/api' \
+        _ "$NAHAL_SH" "$WORK_DIR"
+    [ "$status" -eq 0 ]
+    [[ "$stderr" == *"c1:order"* ]]         # -c on wins over NAHAL_CURIES=off
+}
+
+@test "links menu (without curies): ambiguous local name disambiguates and logs the real rel" {
+    # Single ambiguous group so the menu positions are the same under jq and yq.
+    export MOCK_BODY='{"_links":{"curies":[{"name":"c1","href":"https://d/{rel}","templated":true},{"name":"c2","href":"https://d2/{rel}","templated":true}],"c1:item":{"href":"/i1"},"c2:item":{"href":"/i2"}},"title":"t"}'
+    _type_key '1'   # links            → links menu: back(1) item (c1, c2)(2)
+    _type_key '2'   # item (ambiguous) → disambiguation: back(1) c1:item(2) c2:item(3)
+    _type_key '2'   # c1:item
+    _type_key '1'   # follow (send request)
+    _type_key '5'   # quit (followed resource)
+    run --separate-stderr bash -c 'cd "$2" && bash "$1" -p step_ http://example.com/api' \
+        _ "$NAHAL_SH" "$WORK_DIR"
+    [ "$status" -eq 0 ]
+    local s; s=$(ls -d "${WORK_DIR}"/nahal_*/session.sh | head -1)
+    grep -qF 'links c1:item' "$s"           # the real prefixed rel is followed/logged
+    grep -qF '# follow links c1:item' "$s"
+    ! grep -qF 'links item' "$s"            # never the bare local name
+}
+
+@test "links menu (without curies): single-match prefixed rel follows directly" {
+    export MOCK_BODY='{"_links":{"curies":[{"name":"c1","href":"https://d/{rel}","templated":true}],"c1:only":{"href":"/o"}},"title":"t"}'
+    _type_key '1'   # links   → back(1) only(2)
+    _type_key '2'   # only    → single match, no disambiguation → action menu
+    _type_key '1'   # follow
+    _type_key '5'   # quit
+    run --separate-stderr bash -c 'cd "$2" && bash "$1" -p step_ http://example.com/api' \
+        _ "$NAHAL_SH" "$WORK_DIR"
+    [ "$status" -eq 0 ]
+    local s; s=$(ls -d "${WORK_DIR}"/nahal_*/session.sh | head -1)
+    grep -qF 'links c1:only' "$s"
+    ! grep -qF 'links only' "$s"
+}
+
+@test "links menu: an invalid -c value errors with usage and exits 2" {
+    run bash -c 'cd "$2" && bash "$1" -c bogus http://example.com/api' _ "$NAHAL_SH" "$WORK_DIR"
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"invalid -c value"* ]]
+}
+
+@test "links menu: an invalid NAHAL_CURIES value errors and exits 2" {
+    run bash -c 'cd "$2" && NAHAL_CURIES=bogus bash "$1" http://example.com/api' _ "$NAHAL_SH" "$WORK_DIR"
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"invalid NAHAL_CURIES"* ]]
 }
 
 # ── session.sh replay generation ──────────────────────────────────────────────

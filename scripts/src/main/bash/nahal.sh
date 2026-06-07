@@ -33,7 +33,8 @@
 # Replaying it requires the HALDiSh environment on PATH (source env.sh).
 #
 # Link plugins (HAL_LINK_PLUGIN): a colon-separated list of scripts that each
-# link object is piped through before it is followed.  Each plugin reads the
+# link object is piped through before it is followed — including a resolved CURIE
+# documentation link before its page is opened.  Each plugin reads the
 # current link JSON on stdin, receives the resource file and HAL path as args,
 # and must print the updated link JSON (with .href) to stdout (see
 # _hal_run_plugins in hal_utils.sh).  The plugin list in effect at session
@@ -69,6 +70,7 @@ _BROW_LAST_BINDINGS=()   # uritemplate var=value bindings from the last expansio
 _BROW_LAST_URL=''        # expanded URL from the last _brow_expand_vars call
 _BROW_PREFIX=''          # user-provided base-name prefix for response files (-p)
 _BROW_PREFIX_SET=0       # 1 when -p was supplied, so the prompt is skipped
+_BROW_SHOW_CURIES=false  # links menu: true = full prefixed rels, false = local names (-c / NAHAL_CURIES)
 
 # ── tool initialization ───────────────────────────────────────────────────────
 
@@ -1003,33 +1005,125 @@ _brow_navigate_array() {
     done
 }
 
+# _brow_rel_templated_suffix <links_json> <rel>  → " {T}" when the link (or the
+# first element of an array-valued link) is templated, else nothing.
+_brow_rel_templated_suffix() {
+    local links="$1" rel="$2" lobj ltype templated
+    lobj=$(_brow_qk "$links" "$rel")
+    ltype=$(_brow_qtype "$lobj")
+    if [[ "$ltype" == "array" ]]; then
+        templated=$(_brow_qr "$lobj" '.[0].templated // false')
+    else
+        templated=$(_brow_qr "$lobj" '.templated // false')
+    fi
+    [[ "$templated" == "true" ]] && printf ' {T}'
+    return 0   # never fail the caller's command (it runs under set -e)
+}
+
 # _brow_nav_links <json> <url> <src_base>
+# Lists the resource's followable link rels (never the reserved `curies` array).
+# With _BROW_SHOW_CURIES=true each rel is shown verbatim (e.g. curie1:curied);
+# otherwise rels are shown by local name (prefix stripped) and grouped, so several
+# prefixed rels sharing a local name collapse into one entry that disambiguates on
+# selection.  Either way the real `_links` key is what gets followed and logged.
 _brow_nav_links() {
     local json="$1" url="$2" src_base="$3"
-    local links rels
+    local links
     links=$(_brow_qk "$json" "_links")
-    rels=$(_brow_qr  "$links" 'keys[]')
+
+    # All followable rels (exclude the reserved CURIE definitions).
+    local -a all_rels=()
+    local r
+    while IFS= read -r r; do
+        [[ "$r" == "curies" ]] && continue
+        all_rels+=("$r")
+    done < <(_brow_qr "$links" 'keys[]')
 
     while true; do
-        local opts=("${_BROW_NAV}back")
-        while IFS= read -r rel; do
-            local lobj ltype templated suffix=''
-            lobj=$(_brow_qk "$links" "$rel")
-            ltype=$(_brow_qtype "$lobj")
-            if [[ "$ltype" == "array" ]]; then
-                templated=$(_brow_qr "$lobj" '.[0].templated // false')
-            else
-                templated=$(_brow_qr "$lobj" '.templated // false')
-            fi
-            [[ "$templated" == "true" ]] && suffix=" {T}"
-            opts+=("${rel}${suffix}")
-        done <<< "$rels"
+        # Build parallel arrays: a menu label and the newline-joined real rels it
+        # stands for.  Single-rel entries follow directly; multi-rel entries (only
+        # possible in without-curies mode) disambiguate after selection.
+        local -a entry_label=() entry_rels=()
+        if [[ "$_BROW_SHOW_CURIES" == "true" ]]; then
+            for r in "${all_rels[@]+"${all_rels[@]}"}"; do
+                entry_label+=("${r}$(_brow_rel_templated_suffix "$links" "$r")")
+                entry_rels+=("$r")
+            done
+        else
+            # Curie names define which prefixes may be stripped; an absolute-URI
+            # rel like "https://ex/rel" contains ':' but is not a curie and stays.
+            local -a curi_names=()
+            while IFS= read -r r; do
+                [[ -n "$r" ]] && curi_names+=("$r")
+            done < <(_brow_curi_names "$links")
 
+            # Group real rels by local name, preserving first-appearance order.
+            local -a g_local=() g_rels=()
+            local local_name j found pfx cn
+            for r in "${all_rels[@]+"${all_rels[@]}"}"; do
+                local_name="$r"
+                if [[ "$r" == *:* ]]; then
+                    pfx="${r%%:*}"
+                    for cn in "${curi_names[@]+"${curi_names[@]}"}"; do
+                        [[ "$cn" == "$pfx" ]] && { local_name="${r#*:}"; break; }
+                    done
+                fi
+                found=-1
+                for j in "${!g_local[@]}"; do
+                    [[ "${g_local[j]}" == "$local_name" ]] && { found=$j; break; }
+                done
+                if [[ $found -ge 0 ]]; then g_rels[found]+=$'\n'"$r"
+                else g_local+=("$local_name"); g_rels+=("$r"); fi
+            done
+            for j in "${!g_local[@]}"; do
+                local -a members=()
+                while IFS= read -r r; do members+=("$r"); done <<< "${g_rels[j]}"
+                if [[ ${#members[@]} -eq 1 ]]; then
+                    entry_label+=("${g_local[j]}$(_brow_rel_templated_suffix "$links" "${members[0]}")")
+                    entry_rels+=("${members[0]}")
+                else
+                    # Ambiguous: label notes the contributing prefixes ("-" for a
+                    # prefix-less rel); the {T} marker is deferred to the submenu.
+                    local prefixes='' m pfx
+                    for m in "${members[@]}"; do
+                        if [[ "$m" == *:* ]]; then pfx="${m%%:*}"; else pfx="-"; fi
+                        prefixes+="${prefixes:+, }${pfx}"
+                    done
+                    entry_label+=("${g_local[j]} (${prefixes})")
+                    entry_rels+=("${g_rels[j]}")
+                fi
+            done
+        fi
+
+        local opts=("${_BROW_NAV}back" "${entry_label[@]+"${entry_label[@]}"}")
         local chosen
         chosen=$(printf '%s\n' "${opts[@]}" | menu.sh "Links")
         [[ "$chosen" == "back" ]] && return 0
 
-        local rel="${chosen% \{T\}}"
+        # Map the chosen label back to its real rel(s).
+        local sel=-1 k
+        for k in "${!entry_label[@]}"; do
+            [[ "${entry_label[k]}" == "$chosen" ]] && { sel=$k; break; }
+        done
+        [[ $sel -lt 0 ]] && continue
+
+        local -a sel_members=()
+        while IFS= read -r r; do sel_members+=("$r"); done <<< "${entry_rels[sel]}"
+
+        local rel
+        if [[ ${#sel_members[@]} -gt 1 ]]; then
+            local dis_opts=("${_BROW_NAV}back") m
+            for m in "${sel_members[@]}"; do
+                dis_opts+=("${m}$(_brow_rel_templated_suffix "$links" "$m")")
+            done
+            local dchoice
+            dchoice=$(printf '%s\n' "${dis_opts[@]}" | menu.sh "Choose rel")
+            [[ "$dchoice" == "back" ]] && continue
+            rel="${dchoice% \{T\}}"
+        else
+            rel="${sel_members[0]}"
+        fi
+
         local lobj ltype
         lobj=$(_brow_qk "$links" "$rel")
         ltype=$(_brow_qtype "$lobj")
@@ -1208,6 +1302,29 @@ _brow_nav_properties() {
 
 # ── documentation (CURIE) ─────────────────────────────────────────────────────
 
+# _brow_curies_mode <value>  → 'true' (with curies) or 'false' (without) on stdout;
+# returns 1 on an unrecognized value.  Accepts on/true and off/false (any case).
+_brow_curies_mode() {
+    case "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" in
+        on|true)   printf 'true'  ;;
+        off|false) printf 'false' ;;
+        *)         return 1 ;;
+    esac
+}
+
+# _brow_curi_names <links_json>  → the names defined in _links.curies, one per
+# line (empty when there is no curies array).
+_brow_curi_names() {
+    local links="$1"
+    [[ "$(_brow_qr "$links" 'has("curies")')" == "true" ]] || return 0
+    local curies_json count i
+    curies_json=$(_brow_qk "$links" "curies")
+    count=$(_brow_qr "$curies_json" 'length')
+    for (( i = 0; i < count; i++ )); do
+        _brow_qkr "$(_brow_qi "$curies_json" "$i")" 'name'
+    done
+}
+
 # _brow_curi_rels <json>  → CURIE-prefixed rels, one per line
 # Lists each _links rel of the form "<prefix>:<name>" whose <prefix> is defined
 # in the resource's _links.curies array.  Prints nothing when the resource has
@@ -1236,13 +1353,16 @@ _brow_curi_rels() {
     done < <(_brow_qr "$links" 'keys[]')
 }
 
-# _brow_resolve_curi_url <links_json> <rel>  → documentation URL on stdout
-# Expands the matching curie href template (e.g. {rel}) for the rel's prefix.
-# Returns 1 when no curie defines the rel's prefix.
-_brow_resolve_curi_url() {
+# _brow_curi_link <links_json> <rel>  → the matching curie link object with its
+# href expanded to the documentation URL per HAL rules (the `{rel}` template is
+# substituted with the rel's local name, and `templated` becomes false).  The
+# rest of the curie object (e.g. `name`) is preserved, so the result is a proper
+# link object that can be passed through HAL_LINK_PLUGIN.  Returns 1 when no
+# curie defines the rel's prefix.
+_brow_curi_link() {
     local links="$1" rel="$2"
     local prefix="${rel%%:*}" local_name="${rel#*:}"
-    local curies_json count i obj name href
+    local curies_json count i obj name href url
     curies_json=$(_brow_qk "$links" "curies")
     count=$(_brow_qr "$curies_json" 'length')
     for (( i = 0; i < count; i++ )); do
@@ -1250,11 +1370,25 @@ _brow_resolve_curi_url() {
         name=$(_brow_qkr "$obj" 'name')
         if [[ "$name" == "$prefix" ]]; then
             href=$(_brow_qkr "$obj" 'href')
-            bash "${_SCRIPT_DIR}/uritemplate.sh" "$href" "rel=${local_name}"
+            url=$(bash "${_SCRIPT_DIR}/uritemplate.sh" "$href" "rel=${local_name}")
+            if [[ "$_BROW_TOOL" == yq ]]; then
+                printf '%s' "$obj" | HAL_HREF="$url" yq -o json -I0 \
+                    '.href = env(HAL_HREF) | .templated = false'
+            else
+                printf '%s' "$obj" | jq -c --arg h "$url" '.href = $h | .templated = false'
+            fi
             return 0
         fi
     done
     return 1
+}
+
+# _brow_resolve_curi_url <links_json> <rel>  → documentation URL on stdout, i.e.
+# the expanded href of the matching curie link.  Returns 1 when no curie matches.
+_brow_resolve_curi_url() {
+    local link
+    link=$(_brow_curi_link "$1" "$2") || return 1
+    _brow_qkr "$link" 'href'
 }
 
 # _brow_open_docs <url>  → opens the documentation page in the default browser
@@ -1288,8 +1422,21 @@ _brow_nav_docs() {
         chosen=$(printf '%s\n' "${opts[@]}" | menu.sh "Docs")
         [[ "$chosen" == "back" ]] && return 0
 
-        local doc_url
-        if doc_url=$(_brow_resolve_curi_url "$links" "$chosen"); then
+        local doc_link doc_url
+        if doc_link=$(_brow_curi_link "$links" "$chosen"); then
+            # Run the resolved curie link through HAL_LINK_PLUGIN before opening,
+            # exactly as link following does, so plugins can rewrite the doc href.
+            if [[ -n "${HAL_LINK_PLUGIN:-}" ]]; then
+                local _resource_file=''
+                [[ -n "${_BROW_LAST_BASE:-}" ]] && \
+                    _resource_file="${_BROW_OUTDIR}/${_BROW_LAST_BASE}.body"
+                doc_link=$(_hal_run_plugins "$doc_link" \
+                    ${_resource_file:+"$_resource_file"} \
+                    "${_BROW_NAV_PATH[@]+"${_BROW_NAV_PATH[@]}"}" \
+                    "docs" "$chosen") \
+                    || { hal::log::error "plugin failed — not opening docs"; continue; }
+            fi
+            doc_url=$(_brow_qkr "$doc_link" 'href')
             _brow_open_docs "$doc_url"
         else
             hal::log::warn "No CURI found for prefix: ${chosen%%:*}"
@@ -1303,10 +1450,12 @@ _brow_usage() {
     local name
     name="$(basename "$0")"
     printf 'Usage:\n' >&2
-    printf '  %s [-p <prefix>] <URL>\n' "$name" >&2
-    printf '  %s [-p <prefix>] <link-text>              # HAL link object (JSON/XML/YAML)\n' "$name" >&2
-    printf '  %s [-p <prefix>] <resource-file> [path…]  # link extracted from a file\n' "$name" >&2
+    printf '  %s [-p <prefix>] [-c on|off] <URL>\n' "$name" >&2
+    printf '  %s [-p <prefix>] [-c on|off] <link-text>              # HAL link object (JSON/XML/YAML)\n' "$name" >&2
+    printf '  %s [-p <prefix>] [-c on|off] <resource-file> [path…]  # link extracted from a file\n' "$name" >&2
     printf '\n-p <prefix>: base-name prefix for response files (prompted if omitted; empty allowed)\n' >&2
+    printf -- '-c on|off  : links menu shows full CURIE-prefixed rels (on/true) or local names\n' >&2
+    printf '             (off/false, default); also via NAHAL_CURIES.  -c overrides the env var.\n' >&2
     printf 'Path examples: links self    |  links items 0\n' >&2
 }
 
@@ -1368,11 +1517,22 @@ _brow_resolve_start() {
 # helper functions in isolation without launching an interactive session.
 if [[ "${BASH_SOURCE[0]:-}" == "${0}" ]]; then
 
+# Curies display mode: NAHAL_CURIES sets the default, -c overrides it (CLI wins).
+if [[ -n "${NAHAL_CURIES:-}" ]]; then
+    _BROW_SHOW_CURIES=$(_brow_curies_mode "$NAHAL_CURIES") || {
+        printf 'nahal: invalid NAHAL_CURIES value: %s (use on|off|true|false)\n' \
+            "$NAHAL_CURIES" >&2; exit 2; }
+fi
+
 # -p <prefix> sets the response-file base-name prefix (empty allowed); when
-# omitted we prompt for it.  Options precede the URL / link / file arguments.
-while getopts ":p:" _opt; do
+# omitted we prompt for it.  -c on|off toggles CURIE-prefixed rels in the links
+# menu.  Options precede the URL / link / file arguments.
+while getopts ":p:c:" _opt; do
     case "$_opt" in
         p) _BROW_PREFIX="$OPTARG"; _BROW_PREFIX_SET=1 ;;
+        c) _BROW_SHOW_CURIES=$(_brow_curies_mode "$OPTARG") || {
+               printf 'nahal: invalid -c value: %s (use on|off|true|false)\n' \
+                   "$OPTARG" >&2; exit 2; } ;;
         *) _brow_usage; exit 1 ;;
     esac
 done

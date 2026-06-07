@@ -320,9 +320,9 @@ are navigated with `hal.sh`, so `nahal.sh` needs the HALDiSh environment active
 
 [source,bash]
 ----
-nahal.sh [-p <prefix>] <URL>                   # start from a URL
-nahal.sh [-p <prefix>] <link-text>             # start from a HAL link object
-nahal.sh [-p <prefix>] <resource-file> [path…] # start from a link in a file
+nahal.sh [-p <prefix>] [-c on|off] <URL>                   # start from a URL
+nahal.sh [-p <prefix>] [-c on|off] <link-text>             # start from a HAL link object
+nahal.sh [-p <prefix>] [-c on|off] <resource-file> [path…] # start from a link in a file
 ----
 
 For the file form, `path` is a `hal.sh` link path, e.g. `links self` or
@@ -330,6 +330,18 @@ For the file form, `path` is a `hal.sh` link path, e.g. `links self` or
 
 `-p <prefix>` sets the base-name prefix for the response files; when omitted you
 are prompted for it (an empty value is accepted, giving bare numbers).
+
+`-c on|off` (also `true`/`false`, case-insensitive) controls how the *links*
+menu shows CURIE-prefixed relations; the environment variable `NAHAL_CURIES`
+sets the default and `-c` overrides it.  With `on`, each relation is listed
+verbatim (e.g. `c1:order`, `c2:order`).  With `off` (the default) relations are
+listed by their local name with the curie prefix stripped, so several prefixed
+relations sharing a local name collapse into one entry — `order (c1, c2)` —
+that, when chosen, opens a submenu of the full relations to disambiguate; a
+local name backed by a single relation is followed directly.  Either way the
+reserved `_links.curies` array is never listed, and the real relation key is
+what gets followed and recorded in `session.sh`.  An unrecognized value prints
+usage and exits `2`.
 
 === Session directory
 
@@ -362,12 +374,15 @@ The resource menu offers only the sections the resource actually has:
 
 * `links` — browse `_links`; pick a relation (templated links are marked `{T}`),
   choose an element for array-valued links, then *follow* it or *show link
-  details*.
+  details*.  Relations are listed by local name unless `-c on` / `NAHAL_CURIES`
+  is set (see Usage); the reserved `curies` array is never listed.
 * `embedded` — descend into `_embedded` resources (selecting an index for arrays).
 * `properties` — traverse the non-HAL properties (objects, arrays, scalars).
 * `docs` — shown only when the resource has a `curies` array *and* at least one
   relation uses a defined CURIE prefix; resolves the curie template and opens the
-  documentation page in the browser.
+  documentation page in the browser.  The resolved curie link is run through
+  `HAL_LINK_PLUGIN` first (just like a followed link), so plugins can rewrite the
+  documentation href before it is opened.
 * `print resource` — pretty-print the current resource.
 * `back` / `quit` — go up one level, or end the session.
 
