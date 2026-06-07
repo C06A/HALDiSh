@@ -3,7 +3,7 @@
 #
 # Usage:
 #   hal.sh <file>                                  interactive
-#   hal.sh <file> links [rel [N] [field]]          non-interactive
+#   hal.sh <file> links [rel [N|name] [field]]     non-interactive
 #   hal.sh <file> embeddeds [rel [N] [args...]]    non-interactive
 #   hal.sh <file> properties [key [args...]]       non-interactive
 #   hal.sh <file> docs [rel]                       non-interactive: list/expand CURI doc URLs
@@ -125,6 +125,20 @@ _qi() {
     _q "$json" ".[$idx]"
 }
 
+# _qn <json-array> <name>  → first element whose .name == <name>, or "null" if none.
+# HAL uses a link object's "name" as a secondary key disambiguating links that
+# share a relation type, so this is the natural way to pick one out of an array.
+_qn() {
+    local json="$1" name="$2"
+    if [[ "$_HAL_TOOL" == yq ]]; then
+        printf '%s' "$json" | HAL_N="$name" yq -o json -I0 \
+            '[.[] | select(.name == env(HAL_N))] | .[0] // null'
+    else
+        printf '%s' "$json" | jq -c --arg n "$name" \
+            'map(select(.name == $n)) | .[0] // null'
+    fi
+}
+
 _usage() {
     printf 'Usage: %s <file> [links|embeddeds|properties|docs [...]]\n' "$(basename "$0")" >&2
 }
@@ -215,10 +229,17 @@ _traverse() {
             link=$(_qk "$links" "$rel")
             local ltype
             ltype=$(_qtype "$link")
-            if [[ "$ltype" == "array" ]]; then
-                if [[ $# -gt 0 && "$1" =~ ^[0-9]+$ ]]; then
-                    local idx="$1"; shift
-                    link=$(_qi "$link" "$idx")
+            if [[ "$ltype" == "array" && $# -gt 0 ]]; then
+                # Select one element of the link array: a numeric segment is an
+                # index, anything else matches against each element's "name".
+                local sel="$1"; shift
+                if [[ "$sel" =~ ^[0-9]+$ ]]; then
+                    link=$(_qi "$link" "$sel")
+                else
+                    link=$(_qn "$link" "$sel")
+                    if [[ "$link" == "null" ]]; then
+                        printf 'hal: no link named: %s\n' "$sel" >&2; exit 1
+                    fi
                 fi
             fi
             _traverse_link "$link" "$@"
@@ -351,6 +372,90 @@ _read_index() {
     done
 }
 
+# _menu_pick_index <array_json> <prompt> [label_field]
+# Renders one menu row per array element and prints the chosen index, 'r', or
+# 'q'.  With no <label_field> rows are bare "<idx>"; with one they read
+# "<idx>: <value>" (empty value when the element lacks that field).  The label
+# is cosmetic — the returned value is always the numeric index, so recorded
+# paths and jpaths stay valid.
+_menu_pick_index() {
+    local array="$1" prompt="$2" field="${3:-}"
+    local count i val
+    count=$(_qr "$array" 'length')
+    local opts=()
+    for (( i = 0; i < count; i++ )); do
+        if [[ -n "$field" ]]; then
+            val=$(_qkr "$(_qi "$array" "$i")" "$field")
+            [[ "$val" == "null" ]] && val=''
+            opts+=("$i: $val")
+        else
+            opts+=("$i")
+        fi
+    done
+    opts+=("${_HAL_NAV}return" "${_HAL_NAV}quit")
+    local chosen
+    chosen=$(printf '%s\n' "${opts[@]}" | menu.sh "$prompt")
+    case "$chosen" in
+        return) printf 'r' ;;
+        quit)   printf 'q' ;;
+        *)      printf '%s' "${chosen%%:*}" ;;
+    esac
+}
+
+# _choose_link_index <array_json>  → prints chosen index, 'r', or 'q'
+# Link-array picker: labels each entry with its HAL "name" so links sharing a
+# relation type can be told apart.
+_choose_link_index() {
+    _menu_pick_index "$1" "Index" "name"
+}
+
+# _list_scalar_fields <array_json>  → newline-separated keys (deduped) that hold
+# a scalar value on at least one object element, excluding the reserved HAL
+# _links/_embedded.  Empty output ⇒ nothing sensible to select by (e.g. scalar
+# elements), so callers fall back to index selection.
+_list_scalar_fields() {
+    local array="$1"
+    if [[ "$_HAL_TOOL" == yq ]]; then
+        printf '%s' "$array" | yq -o json -r \
+            '[ .[] | select(tag == "!!map") | to_entries[]
+               | select(.key != "_links" and .key != "_embedded")
+               | select(.value | (tag == "!!str" or tag == "!!int" or tag == "!!float" or tag == "!!bool"))
+               | .key ] | unique | .[]'
+    else
+        printf '%s' "$array" | jq -r \
+            '[ .[] | objects | to_entries[]
+               | select(.key != "_links" and .key != "_embedded")
+               | select(.value | type | (. == "string" or . == "number" or . == "boolean"))
+               | .key ] | unique | .[]'
+    fi
+}
+
+# _choose_by_field <array_json>  → prints chosen index, 'r', or 'q'
+# Two-step picker for embedded-resource and property arrays: first choose a
+# field to select by (or fall back to plain index), then choose an element by
+# its value for that field.  Arrays whose elements expose no scalar fields skip
+# straight to index selection.
+_choose_by_field() {
+    local array="$1"
+    local fields
+    fields=$(_list_scalar_fields "$array")
+    if [[ -z "$fields" ]]; then
+        _menu_pick_index "$array" "Index"
+        return
+    fi
+    local opts=()
+    while IFS= read -r f; do opts+=("$f"); done <<< "$fields"
+    opts+=("${_HAL_NAV}index" "${_HAL_NAV}return" "${_HAL_NAV}quit")
+    local field
+    field=$(printf '%s\n' "${opts[@]}" | menu.sh "Select by")
+    case "$field" in
+        return) printf 'r'; return ;;
+        quit)   printf 'q'; return ;;
+        index)  _menu_pick_index "$array" "Index"; return ;;
+    esac
+    _menu_pick_index "$array" "$field" "$field"
+}
+
 # _interactive_value <val_json> <path> <is_top>
 _interactive_value() {
     local val="$1" path="$2" is_top="$3"
@@ -358,12 +463,10 @@ _interactive_value() {
     vtype=$(_qtype "$val")
 
     if [[ "$vtype" == "array" ]]; then
-        local count
-        count=$(_qr "$val" 'length')
         while true; do
             _show_path "$path"
             local idx
-            idx=$(_read_index "$count")
+            idx=$(_choose_by_field "$val")
             [[ "$idx" == "q" ]] && { _to_jpath "$path"; printf '\n'; exit 0; }
             [[ "$idx" == "r" ]] && return 0
             local elem
@@ -461,11 +564,9 @@ _interactive_links() {
         lobj=$(_qk "$links" "$rel")
         ltype=$(_qtype "$lobj")
         if [[ "$ltype" == "array" ]]; then
-            local count
-            count=$(_qr "$lobj" 'length')
             _show_path "$path links $rel"
             local idx
-            idx=$(_read_index "$count")
+            idx=$(_choose_link_index "$lobj")
             [[ "$idx" == "q" ]] && { _to_jpath "$path links $rel"; printf '\n'; exit 0; }
             [[ "$idx" == "r" ]] && continue
             lobj=$(_qi "$lobj" "$idx")
@@ -495,11 +596,9 @@ _interactive_embeddeds() {
         item=$(_qk "$embedded" "$chosen")
         itype=$(_qtype "$item")
         if [[ "$itype" == "array" ]]; then
-            local count
-            count=$(_qr "$item" 'length')
             _show_path "$path embeddeds $chosen"
             local idx
-            idx=$(_read_index "$count")
+            idx=$(_choose_by_field "$item")
             [[ "$idx" == "q" ]] && { _to_jpath "$path embeddeds $chosen"; printf '\n'; exit 0; }
             [[ "$idx" == "r" ]] && continue
             item=$(_qi "$item" "$idx")

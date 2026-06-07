@@ -18,9 +18,6 @@ SCRIPTS_DIR="$(pwd)/scripts/src/main/bash" \
 
 # Full build (assemble + test)
 ./gradlew :scripts:build
-
-# Install git hooks (run once after cloning)
-./gradlew installGitHooks
 ```
 
 BATS is auto-installed to `scripts/build/bats/` on first `test` run.
@@ -38,7 +35,12 @@ The self-inflatable archive bundles every `*.sh` file; `setup.sh` runs post-extr
 | `hal_utils.sh` | Sourced library: `hal::str::*`, `hal::arr::*`, `hal::fs::*`, `hal::log::*`.
  Has a double-source guard (`_HAL_UTILS_LOADED`). |
 | `env.sh` | Activation script — `source env.sh` to load the library and add the directory to `PATH`. Calls `validate.sh` first. |
-| `hal.sh` | Navigate HAL JSON/YAML/XML documents: interactive or `hal.sh <file> links|embeddeds|properties|docs [path…]`. |
+| `hal.sh` | Navigate HAL JSON/YAML/XML documents: interactive or `hal.sh <file> links|embeddeds|properties|docs [path…]`.
+ Array selection: a non-interactive `links <rel> <N\|name>` segment is a numeric index or, otherwise,
+ a match on the element's `name` (unmatched name exits 1).
+ Interactively, link arrays are picked from a `name`-labelled menu;
+ embedded-resource and property arrays first prompt for a field to select by (or index), then list elements by that field's value;
+ scalar arrays are picked by index. All pickers resolve to the numeric index so recorded paths/jpaths stay valid. |
 | `hallink.sh` | Resolve a HAL link object's `href`, expanding URI templates. Two modes: `--link <obj>` or `<file> <hal-path>`. |
 | `haldoclink.sh` | Emit a documentation link `{"href":"<doc_url>","type":"text/html"}` for a CURIE-prefixed relation.
  Searches `_links.curies` from the deepest embedded resource up to the root. `<file> <hal-path>` only. |
@@ -107,5 +109,4 @@ Tool-absence tests inject broken stubs by prepending a stub directory to `PATH` 
 
 ### README
 
-`README.asciidoc` is the source of truth. `README.md` is generated from it by `pandoc` and must never be edited directly.
-The pre-commit hook enforces this and auto-regenerates `README.md` when `README.asciidoc` is staged.
+`README.asciidoc` is the source of truth.

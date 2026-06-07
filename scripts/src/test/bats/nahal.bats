@@ -584,6 +584,26 @@ CURI_RES='{"_links":{"self":{"href":"/r"},"curies":[{"name":"ex","href":"https:/
     [[ "$stderr" == *"/api/a"* ]]
 }
 
+@test "interactive: follow an element of an array-valued link rel, logging the index" {
+    # _links.items is an array of two links; only that one rel so menu positions
+    # are the same under jq (sorted keys) and yq (document order).
+    export MOCK_BODY='{"_links":{"items":[{"href":"/a"},{"href":"/b"}]},"title":"t"}'
+    _type_key '1'   # links                 (top: links(1) properties(2) print(3) quit(4))
+    _type_key '2'   # items                 (links: back(1) items(2))
+    _type_key '3'   # element 1 → /b        (choose link: back(1) 0:/a(2) 1:/b(3))
+    _type_key '1'   # follow (send request) (action: follow(1) details(2) back(3))
+    _type_key '1'   # GET                   (HTTP method menu: GET(1) …)
+    _type_key '5'   # quit                  (followed resource: links(1) properties(2) print(3) back(4) quit(5))
+    run --separate-stderr bash -c 'cd "$2" && bash "$1" -p step_ http://example.com/api' \
+        _ "$NAHAL_SH" "$WORK_DIR"
+    [ "$status" -eq 0 ]
+    [[ "$stderr" == *"Choose link"* ]]      # the array element picker appeared
+    local s; s=$(ls -d "${WORK_DIR}"/nahal_*/session.sh | head -1)
+    grep -qF 'hallink.sh "${_b[1]}.body" links items 1' "$s"   # indexed hal-path
+    grep -qF '# follow links items 1' "$s"                     # comment carries the index
+    ! grep -qF 'links items 0' "$s"                            # the other element not followed
+}
+
 @test "interactive: docs option appears for a CURIE resource and opens the doc URL" {
     # Single curie rel so the docs-menu selection is deterministic regardless of
     # whether jq (sorted) or yq (document order) lists the keys.
@@ -685,7 +705,8 @@ CURIE_LINKS_BODY='{"_links":{"self":{"href":"/api/r"},"curies":[{"name":"c1","hr
     _type_key '2'   # item (ambiguous) → disambiguation: back(1) c1:item(2) c2:item(3)
     _type_key '2'   # c1:item
     _type_key '1'   # follow (send request)
-    _type_key '5'   # quit (followed resource)
+    _type_key '1'   # GET (HTTP method menu)
+    _type_key '6'   # quit (followed resource has docs: links(1) props(2) docs(3) print(4) back(5) quit(6))
     run --separate-stderr bash -c 'cd "$2" && bash "$1" -p step_ http://example.com/api' \
         _ "$NAHAL_SH" "$WORK_DIR"
     [ "$status" -eq 0 ]
@@ -700,7 +721,8 @@ CURIE_LINKS_BODY='{"_links":{"self":{"href":"/api/r"},"curies":[{"name":"c1","hr
     _type_key '1'   # links   → back(1) only(2)
     _type_key '2'   # only    → single match, no disambiguation → action menu
     _type_key '1'   # follow
-    _type_key '5'   # quit
+    _type_key '1'   # GET (HTTP method menu)
+    _type_key '6'   # quit (followed resource has docs: links(1) props(2) docs(3) print(4) back(5) quit(6))
     run --separate-stderr bash -c 'cd "$2" && bash "$1" -p step_ http://example.com/api' \
         _ "$NAHAL_SH" "$WORK_DIR"
     [ "$status" -eq 0 ]

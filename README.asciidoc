@@ -212,7 +212,7 @@ and fails back on `jq`, which supports JSON-only use.
 [source,bash]
 ----
 hal.sh <file>                                   # interactive
-hal.sh <file> links      [rel [N] [field]]      # non-interactive
+hal.sh <file> links      [rel [N|name] [field]] # non-interactive
 hal.sh <file> embeddeds  [rel [N] [args...]]    # non-interactive
 hal.sh <file> properties [key [args...]]        # non-interactive
 hal.sh <file> docs                              # interactive docs browser
@@ -227,9 +227,11 @@ hal.sh <file> docs       <rel>                  # non-interactive: print doc URL
 
 |`links`
 |Extract from `_links`.  With no further arguments, prints all relation names.
-With `rel`, returns the link object for that relation.  Append `N` for a
-specific element of an array-valued link.  Append `field` (e.g. `href`,
-`templated`, `title`) to extract a single field from the link object.
+With `rel`, returns the link object for that relation.  For an array-valued
+link, select one element with `N|name`: a numeric value is an index, anything
+else matches against each element's `name` (the HAL secondary key); an
+unmatched name exits 1.  Append `field` (e.g. `href`, `templated`, `title`)
+to extract a single field from the selected link object.
 
 |`embeddeds`
 |Extract from `_embedded`.  With no further arguments, prints all relation
@@ -256,6 +258,10 @@ Invoking `hal.sh <file>` with no sub-command opens a menu-driven navigator:
 * At the top level you are offered the choices available in the document
   (`links`, `embeddeds`, `properties`, `print`, `exit`).
 * Descend into any section and navigate deeper; choose `return` to go back up.
+* Selecting an array picks an element by a labelled menu: link arrays are
+  labelled by each element's `name`; embedded-resource and property arrays
+  first ask which field to select by (or fall back to index), then list the
+  elements by that field's value.  Arrays of plain scalars are chosen by index.
 * Choosing `print` writes the JSON of the current node to stdout.
 * Choosing `quit` (from nested menus) or `exit` (from the top level) prints
   the jq/yq filter expression for the current position to stdout and exits.
@@ -292,6 +298,9 @@ hal.sh response.body links
 
 # href of the self link
 hal.sh response.body links self href
+
+# href of the link named "next" within the array-valued "pages" relation
+hal.sh response.body links pages next href
 
 # Second embedded "items" resource
 hal.sh response.body embeddeds items 1

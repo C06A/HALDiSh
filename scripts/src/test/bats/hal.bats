@@ -14,7 +14,7 @@ HAL_SH="${SCRIPTS_DIR}/hal.sh"
 HAL_JSON='{
   "_links": {
     "self":  { "href": "/api/r" },
-    "items": [{ "href": "/api/1" }, { "href": "/api/2", "templated": true }],
+    "items": [{ "href": "/api/1", "name": "first" }, { "href": "/api/2", "name": "second", "templated": true }],
     "tmpl":  { "href": "/api{?q}", "templated": true }
   },
   "_embedded": {
@@ -26,7 +26,8 @@ HAL_JSON='{
   "title": "Test Resource",
   "count": 42,
   "meta":  { "created": "2025-01-01", "active": true },
-  "tags":  ["alpha", "beta"]
+  "tags":  ["alpha", "beta"],
+  "rows":  [{ "id": 1, "label": "Row A" }, { "id": 2, "label": "Row B" }]
 }'
 
 CURI_JSON='{
@@ -181,6 +182,31 @@ _type_line() { printf '%s\n' "$@" >&9; }
     [ "$output" = "/api/2" ]
 }
 
+@test "hal.sh links items first href selects array link by name" {
+    run bash "$HAL_SH" "${WORK_DIR}/resource.json" links items first href
+    [ "$status" -eq 0 ]
+    [ "$output" = "/api/1" ]
+}
+
+@test "hal.sh links items second href selects second array link by name" {
+    run bash "$HAL_SH" "${WORK_DIR}/resource.json" links items second href
+    [ "$status" -eq 0 ]
+    [ "$output" = "/api/2" ]
+}
+
+@test "hal.sh links items second prints the named link JSON" {
+    run bash "$HAL_SH" "${WORK_DIR}/resource.json" links items second
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"/api/2"* ]]
+    [[ "$output" == *"second"* ]]
+}
+
+@test "hal.sh links items <unknown-name> exits 1 with error" {
+    run --separate-stderr bash "$HAL_SH" "${WORK_DIR}/resource.json" links items nope href
+    [ "$status" -eq 1 ]
+    [[ "$stderr" == *"no link named: nope"* ]]
+}
+
 # ── non-interactive: embeddeds ────────────────────────────────────────────────
 
 @test "hal.sh embeddeds lists all embedded rels" {
@@ -289,8 +315,8 @@ _type_line() { printf '%s\n' "$@" >&9; }
 @test "interactive: navigate to properties then quit outputs jpath" {
     # Resource menu (5 opts: 1=links 2=embeddeds 3=properties 4=print 5=exit)
     _type_key '3'   # properties
-    # Properties menu: yq sorts keys alphabetically: count(1) meta(2) tags(3) title(4) return(5) quit(6)
-    _type_key '6'   # quit → prints jpath, exits
+    # Properties menu keys sorted: count(1) meta(2) rows(3) tags(4) title(5) return(6) quit(7)
+    _type_key '7'   # quit → prints jpath, exits
     run --separate-stderr bash "$HAL_SH" "${WORK_DIR}/resource.json"
     [ "$status" -eq 0 ]
     # "properties" navigates to the root object; jpath is "."
@@ -305,6 +331,83 @@ _type_line() { printf '%s\n' "$@" >&9; }
     run --separate-stderr bash "$HAL_SH" "${WORK_DIR}/array.json"
     [ "$status" -eq 0 ]
     [[ "$output" == *"Zero"* ]]
+}
+
+@test "interactive: link array picks element by name" {
+    _type_key '1'   # links
+    # Link rel menu (keys sorted): items(1) self(2) tmpl {T}(3) return(4)
+    _type_key '1'   # items (array link)
+    # Name picker: "0: first"(1) "1: second"(2) return(3) quit(4)
+    _type_key '2'   # second
+    # Link detail (fields sorted): href(1) name(2) templated(3) print(4) return(5) quit(6)
+    _type_key '4'   # print
+    _type_key '6'   # quit
+    run --separate-stderr bash "$HAL_SH" "${WORK_DIR}/resource.json"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"/api/2"* ]]
+    [[ "$output" == *"second"* ]]
+}
+
+@test "interactive: embedded array selects by field then value" {
+    _type_key '2'   # embeddeds
+    # Embedded rel menu: items(1) return(2)
+    _type_key '1'   # items (array)
+    # Select-by menu: name(1) index(2) return(3) quit(4)
+    _type_key '1'   # name
+    # Value menu "name": "0: Item 1"(1) "1: Item 2"(2) return(3) quit(4)
+    _type_key '2'   # Item 2
+    # Embedded resource menu: links(1) properties(2) print(3) return(4) quit(5)
+    _type_key '3'   # print
+    _type_key '5'   # quit
+    run --separate-stderr bash "$HAL_SH" "${WORK_DIR}/resource.json"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Item 2"* ]]
+    [[ "$output" == *"/api/2"* ]]
+}
+
+@test "interactive: embedded array can fall back to index" {
+    _type_key '2'   # embeddeds
+    _type_key '1'   # items (array)
+    # Select-by menu: name(1) index(2) return(3) quit(4)
+    _type_key '2'   # index
+    # Index menu: 0(1) 1(2) return(3) quit(4)
+    _type_key '1'   # element 0
+    # Embedded resource menu: links(1) properties(2) print(3) return(4) quit(5)
+    _type_key '3'   # print
+    _type_key '5'   # quit
+    run --separate-stderr bash "$HAL_SH" "${WORK_DIR}/resource.json"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Item 1"* ]]
+    [[ "$output" == *"/api/1"* ]]
+}
+
+@test "interactive: object property array selects by field" {
+    _type_key '3'   # properties
+    # Properties menu: count(1) meta(2) rows(3) tags(4) title(5) return(6) quit(7)
+    _type_key '3'   # rows (array of objects)
+    # Select-by menu: id(1) label(2) index(3) return(4) quit(5)
+    _type_key '2'   # label
+    # Value menu "label": "0: Row A"(1) "1: Row B"(2) return(3) quit(4)
+    _type_key '1'   # Row A
+    # Element object menu: id(1) label(2) print(3) return(4) quit(5)
+    _type_key '3'   # print
+    _type_key '5'   # quit
+    run --separate-stderr bash "$HAL_SH" "${WORK_DIR}/resource.json"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Row A"* ]]
+}
+
+@test "interactive: scalar property array selects by index" {
+    _type_key '3'   # properties
+    # Properties menu: count(1) meta(2) rows(3) tags(4) title(5) return(6) quit(7)
+    _type_key '4'   # tags (array of scalars → index only)
+    # Index menu (no fields): 0(1) 1(2) return(3) quit(4)
+    _type_key '2'   # "beta"
+    # back in the array loop; quit
+    _type_key '4'   # quit
+    run --separate-stderr bash "$HAL_SH" "${WORK_DIR}/resource.json"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"beta"* ]]
 }
 
 # ── yq-specific: key-by-variable lookup (env(HAL_K)) ─────────────────────────
@@ -357,6 +460,13 @@ tags:
 @test "yq: links items 1 href returns second array link href" {
     command -v yq >/dev/null 2>&1 || skip "yq not installed"
     run bash "$HAL_SH" "${WORK_DIR}/resource.json" links items 1 href
+    [ "$status" -eq 0 ]
+    [ "$output" = "/api/2" ]
+}
+
+@test "yq: links items second href selects array link by name" {
+    command -v yq >/dev/null 2>&1 || skip "yq not installed"
+    run bash "$HAL_SH" "${WORK_DIR}/resource.json" links items second href
     [ "$status" -eq 0 ]
     [ "$output" = "/api/2" ]
 }
