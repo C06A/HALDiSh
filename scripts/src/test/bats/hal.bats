@@ -227,6 +227,18 @@ _type_line() { printf '%s\n' "$@" >&9; }
     [ "$output" = "/api/2" ]
 }
 
+@test "hal.sh embeddeds items name=<v> selects embedded by field (value with space)" {
+    run bash "$HAL_SH" "${WORK_DIR}/resource.json" embeddeds items "name=Item 2" links self href
+    [ "$status" -eq 0 ]
+    [ "$output" = "/api/2" ]
+}
+
+@test "hal.sh embeddeds items <unmatched-field> exits 1 with error" {
+    run --separate-stderr bash "$HAL_SH" "${WORK_DIR}/resource.json" embeddeds items name=nope links self href
+    [ "$status" -eq 1 ]
+    [[ "$stderr" == *"no embedded where name=nope"* ]]
+}
+
 # ── non-interactive: properties ───────────────────────────────────────────────
 
 @test "hal.sh properties lists all property keys excluding _links and _embedded" {
@@ -268,6 +280,24 @@ _type_line() { printf '%s\n' "$@" >&9; }
     run bash "$HAL_SH" "${WORK_DIR}/resource.json" properties tags 1
     [ "$status" -eq 0 ]
     [ "$output" = "beta" ]
+}
+
+@test "hal.sh properties rows label=<v> selects object array element by field" {
+    run bash "$HAL_SH" "${WORK_DIR}/resource.json" properties rows "label=Row B" id
+    [ "$status" -eq 0 ]
+    [ "$output" = "2" ]
+}
+
+@test "hal.sh properties rows id=2 selects element by a numeric field" {
+    run bash "$HAL_SH" "${WORK_DIR}/resource.json" properties rows id=2 label
+    [ "$status" -eq 0 ]
+    [ "$output" = "Row B" ]
+}
+
+@test "hal.sh properties rows <unmatched-field> exits 1 with error" {
+    run --separate-stderr bash "$HAL_SH" "${WORK_DIR}/resource.json" properties rows id=99 label
+    [ "$status" -eq 1 ]
+    [[ "$stderr" == *"no element where id=99"* ]]
 }
 
 # ── non-interactive: top-level array ─────────────────────────────────────────

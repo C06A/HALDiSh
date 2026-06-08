@@ -211,12 +211,12 @@ and fails back on `jq`, which supports JSON-only use.
 
 [source,bash]
 ----
-hal.sh <file>                                   # interactive
-hal.sh <file> links      [rel [N|name] [field]] # non-interactive
-hal.sh <file> embeddeds  [rel [N] [args...]]    # non-interactive
-hal.sh <file> properties [key [args...]]        # non-interactive
-hal.sh <file> docs                              # interactive docs browser
-hal.sh <file> docs       <rel>                  # non-interactive: print doc URL
+hal.sh <file>                                       # interactive
+hal.sh <file> links      [rel [N|name] [field]]     # non-interactive
+hal.sh <file> embeddeds  [rel [N|f=v] [args...]]    # non-interactive
+hal.sh <file> properties [key [N|f=v] [args...]]    # non-interactive
+hal.sh <file> docs                                  # interactive docs browser
+hal.sh <file> docs       <rel>                      # non-interactive: print doc URL
 ----
 
 === Non-interactive sub-commands
@@ -228,22 +228,22 @@ hal.sh <file> docs       <rel>                  # non-interactive: print doc URL
 |`links`
 |Extract from `_links`.  With no further arguments, prints all relation names.
 With `rel`, returns the link object for that relation.  For an array-valued
-link, select one element with `N|name`: a numeric value is an index, anything
+link, select one element with `N\|name`: a numeric value is an index, anything
 else matches against each element's `name` (the HAL secondary key); an
 unmatched name exits 1.  Append `field` (e.g. `href`, `templated`, `title`)
 to extract a single field from the selected link object.
 
 |`embeddeds`
 |Extract from `_embedded`.  With no further arguments, prints all relation
-names.  With `rel`, returns the embedded resource (or its array).  Append `N`
-to select an array element, then optionally continue traversing with further
-sub-commands or field names.
+names.  With `rel`, returns the embedded resource (or its array).  Select an
+array element with `N` (index) or `field=value` (match), then optionally
+continue traversing with further sub-commands or field names.
 
 |`properties`
 |Extract top-level properties (those outside `_links` and `_embedded`).
 With no further arguments, prints all property names.  Append `key` to
-retrieve a value, then optionally traverse further with additional keys or
-numeric indices.
+retrieve a value; for an array value select an element with `N` (index) or
+`field=value` (match), then optionally traverse further.
 
 |`docs`
 |With no `rel`, opens an interactive documentation browser listing the curie-defined
@@ -305,11 +305,17 @@ hal.sh response.body links pages next href
 # Second embedded "items" resource
 hal.sh response.body embeddeds items 1
 
+# Embedded "items" resource selected by a field value (instead of an index)
+hal.sh response.body embeddeds items name=Widget links self href
+
 # Value of the "total" property
 hal.sh response.body properties total
 
 # Nested property traversal (array index then key)
 hal.sh response.body properties tags 0
+
+# Property-array element selected by a field value
+hal.sh response.body properties rows id=42 label
 ----
 
 
@@ -496,12 +502,12 @@ Requires `yq` (mikefarah/yq v4) or `jq` for JSON; `uritemplate.sh` on PATH.
 
 [source,bash]
 ----
-hallink.sh --link [<json|xml|yaml>|@<file>] [var=value ...]
-hallink.sh --link                           [var=value ...]  # link from stdin
-hallink.sh <file-or-basename> <hal-path>    [var=value ...]
+hallink.sh --link [<json|xml|yaml>|@<file>] [-- var=value ...]
+hallink.sh --link                           [-- var=value ...]  # link from stdin
+hallink.sh <file-or-basename> <hal-path>    [-- var=value ...]
 ----
 
-`hal-path`: `links <rel> [N]`  or  `embeddeds <rel> [N] links <rel2> [N2]`
+`hal-path`: `links <rel> [N|name]`  or  `embeddeds <rel> [N|field=value] links <rel2> [N2]`
 
 `--link` accepts an inline JSON, YAML, or XML link object, a path prefixed with
 `@` to read from a file, or reads from stdin when no argument follows `--link`.
@@ -509,8 +515,13 @@ hallink.sh <file-or-basename> <hal-path>    [var=value ...]
 File basenames (no `/`) are resolved in the current directory against the
 extensions `.json`, `.xml`, `.yaml`, `.yml`, `.body` in that order.
 
-Variable bindings (`var=value`) follow the same syntax as `uritemplate.sh`;
-see <<_uritemplate_sh_rfc_6570_uri_template_expander,Variable binding syntax>>.
+Template variable bindings follow a literal `--` separator and each must
+contain `=`; everything before `--` is the path (or, with `--link`, the link
+source).  Without a `--` there are no bindings.  This keeps a `field=value`
+array selector in the path (handled by `hal.sh` for `embeddeds`/`properties`)
+distinct from a template binding.  Bindings (`var=value`) themselves follow the
+same syntax as `uritemplate.sh`; see
+<<_uritemplate_sh_rfc_6570_uri_template_expander,Variable binding syntax>>.
 
 === Exit codes
 
@@ -532,14 +543,17 @@ see <<_uritemplate_sh_rfc_6570_uri_template_expander,Variable binding syntax>>.
 # Resolve the href of the self link
 hallink.sh resource.json links self
 
-# Expand a templated link with query variables
-hallink.sh resource.json links search 'q=widgets' 'page=2'
+# Expand a templated link with query variables (bindings follow --)
+hallink.sh resource.json links search -- 'q=widgets' 'page=2'
 
 # Resolve from an embedded resource
 hallink.sh resource.json embeddeds items 0 links self
 
+# Select the embedded resource by a field value, then expand its templated link
+hallink.sh resource.json embeddeds items name=Widget links edit -- 'id=42'
+
 # Pass a link object inline (template expansion)
-hallink.sh --link '{"href":"/api{?q}","templated":true}' 'q=hello'
+hallink.sh --link '{"href":"/api{?q}","templated":true}' -- 'q=hello'
 
 # Read link from a file
 hallink.sh --link @order-link.json

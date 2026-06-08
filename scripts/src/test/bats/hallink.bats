@@ -241,19 +241,19 @@ teardown() {
 # ── Mode A: --link, templated with bindings ────────────────────────────────────
 
 @test "hallink.sh --link expands simple query template" {
-    run bash "$HALLINK_SH" --link '{"href":"/api{?q}","templated":true}' 'q=hello'
+    run bash "$HALLINK_SH" --link '{"href":"/api{?q}","templated":true}' -- 'q=hello'
     [ "$status" -eq 0 ]
     [[ "$output" == *"/api?q=hello"* ]]
 }
 
 @test "hallink.sh --link removes 'templated' after expansion" {
-    run bash "$HALLINK_SH" --link '{"href":"/api{?q}","templated":true}' 'q=hello'
+    run bash "$HALLINK_SH" --link '{"href":"/api{?q}","templated":true}' -- 'q=hello'
     [ "$status" -eq 0 ]
     [[ "$output" != *'"templated"'* ]]
 }
 
 @test "hallink.sh --link expands multi-var query template" {
-    run bash "$HALLINK_SH" --link '{"href":"/api{?q,lang}","templated":true}' 'q=hi' 'lang=en'
+    run bash "$HALLINK_SH" --link '{"href":"/api{?q,lang}","templated":true}' -- 'q=hi' 'lang=en'
     [ "$status" -eq 0 ]
     [[ "$output" == *"q=hi"* ]]
     [[ "$output" == *"lang=en"* ]]
@@ -262,7 +262,7 @@ teardown() {
 @test "hallink.sh --link preserves title and type fields after expansion" {
     run bash "$HALLINK_SH" --link \
         '{"href":"/api{+path}","templated":true,"title":"Resource","type":"application/hal+json"}' \
-        'path=/foo/bar'
+        -- 'path=/foo/bar'
     [ "$status" -eq 0 ]
     [[ "$output" == *"/api/foo/bar"* ]]
     [[ "$output" == *"Resource"* ]]
@@ -288,7 +288,7 @@ teardown() {
 
 @test "hallink.sh --link expands list binding with explode (*)" {
     run bash "$HALLINK_SH" --link '{"href":"/api{?ids*}","templated":true}' \
-        'ids[]=1' 'ids[]=2' 'ids[]=3'
+        -- 'ids[]=1' 'ids[]=2' 'ids[]=3'
     [ "$status" -eq 0 ]
     [[ "$output" == *"ids=1"* ]]
     [[ "$output" == *"ids=2"* ]]
@@ -297,7 +297,7 @@ teardown() {
 
 @test "hallink.sh --link expands list binding without explode (comma-joined)" {
     run bash "$HALLINK_SH" --link '{"href":"/api{?ids}","templated":true}' \
-        'ids[]=1' 'ids[]=2' 'ids[]=3'
+        -- 'ids[]=1' 'ids[]=2' 'ids[]=3'
     [ "$status" -eq 0 ]
     [[ "$output" == *"ids=1,2,3"* ]]
 }
@@ -306,7 +306,7 @@ teardown() {
 
 @test "hallink.sh --link expands dict binding with explode (*)" {
     run bash "$HALLINK_SH" --link '{"href":"{keys*}","templated":true}' \
-        'keys[a]=1' 'keys[b]=2'
+        -- 'keys[a]=1' 'keys[b]=2'
     [ "$status" -eq 0 ]
     # RFC 6570: map explode → alphabetical key=value pairs
     [[ "$output" == *"a=1"* ]]
@@ -315,7 +315,7 @@ teardown() {
 
 @test "hallink.sh --link expands dict binding without explode (interleaved)" {
     run bash "$HALLINK_SH" --link '{"href":"{keys}","templated":true}' \
-        'keys[a]=1' 'keys[b]=2'
+        -- 'keys[a]=1' 'keys[b]=2'
     [ "$status" -eq 0 ]
     # RFC 6570: map non-explode → key,val,key,val interleaved (alphabetical)
     [[ "$output" == *"a,1"* ]]
@@ -338,7 +338,7 @@ teardown() {
 }
 
 @test "hallink.sh --link stdin expands templated link" {
-    run bash "$HALLINK_SH" --link 'q=world' <<< '{"href":"/api{?q}","templated":true}'
+    run bash "$HALLINK_SH" --link -- 'q=world' <<< '{"href":"/api{?q}","templated":true}'
     [ "$status" -eq 0 ]
     [[ "$output" == *"?q=world"* ]]
 }
@@ -358,14 +358,14 @@ teardown() {
 }
 
 @test "hallink.sh expands templated link via file path" {
-    run bash "$HALLINK_SH" "${WORK_DIR}/res.json" links tmpl 'q=test'
+    run bash "$HALLINK_SH" "${WORK_DIR}/res.json" links tmpl -- 'q=test'
     [ "$status" -eq 0 ]
     [[ "$output" == *"?q=test"* ]]
     [[ "$output" != *'"templated"'* ]]
 }
 
 @test "hallink.sh expands templated array element link" {
-    run bash "$HALLINK_SH" "${WORK_DIR}/res.json" links items 1 'q=foo'
+    run bash "$HALLINK_SH" "${WORK_DIR}/res.json" links items 1 -- 'q=foo'
     [ "$status" -eq 0 ]
     [[ "$output" == *"?q=foo"* ]]
 }
@@ -377,7 +377,7 @@ teardown() {
 }
 
 @test "hallink.sh expands templated link inside embedded resource" {
-    run bash "$HALLINK_SH" "${WORK_DIR}/res.json" embeddeds items 0 links sub 'x=42'
+    run bash "$HALLINK_SH" "${WORK_DIR}/res.json" embeddeds items 0 links sub -- 'x=42'
     [ "$status" -eq 0 ]
     [[ "$output" == *"?x=42"* ]]
     [[ "$output" != *'"templated"'* ]]
@@ -392,15 +392,43 @@ teardown() {
 # ── Mode B: field preservation ────────────────────────────────────────────────
 
 @test "hallink.sh preserves title field on mode B templated link" {
-    run bash "$HALLINK_SH" "${WORK_DIR}/res.json" links res 'path=/index'
+    run bash "$HALLINK_SH" "${WORK_DIR}/res.json" links res -- 'path=/index'
     [ "$status" -eq 0 ]
     [[ "$output" == *"Resource"* ]]
 }
 
 @test "hallink.sh preserves type field on mode B templated link" {
-    run bash "$HALLINK_SH" "${WORK_DIR}/res.json" links res 'path=/index'
+    run bash "$HALLINK_SH" "${WORK_DIR}/res.json" links res -- 'path=/index'
     [ "$status" -eq 0 ]
     [[ "$output" == *"application/hal+json"* ]]
+}
+
+# ── Mode B: field=value selector and the -- binding separator ──────────────────
+
+@test "hallink.sh selects an embedded resource by field=value (no bindings)" {
+    run bash "$HALLINK_SH" "${WORK_DIR}/res.json" embeddeds items "name=Item 2" links self
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"/api/2"* ]]
+}
+
+@test "hallink.sh combines a field=value selector with a -- template binding" {
+    run bash "$HALLINK_SH" "${WORK_DIR}/res.json" \
+        embeddeds items "name=Item 1" links sub -- 'x=42'
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"?x=42"* ]]
+    [[ "$output" != *'"templated"'* ]]
+}
+
+@test "hallink.sh rejects a binding after -- that lacks '='" {
+    run --separate-stderr bash "$HALLINK_SH" "${WORK_DIR}/res.json" links tmpl -- notabinding
+    [ "$status" -eq 1 ]
+    [[ "$stderr" == *"binding after -- must be var=value"* ]]
+}
+
+@test "hallink.sh --link rejects an argument before -- as a stray (not a binding)" {
+    run --separate-stderr bash "$HALLINK_SH" --link '{"href":"/api{?q}","templated":true}' 'q=hi'
+    [ "$status" -eq 1 ]
+    [[ "$stderr" == *"bindings must follow --"* ]]
 }
 
 # ── Format preservation ───────────────────────────────────────────────────────

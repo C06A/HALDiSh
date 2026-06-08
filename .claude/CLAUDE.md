@@ -34,8 +34,8 @@ The self-inflatable archive bundles every `*.sh` file; `setup.sh` runs post-extr
 |---|---|
 | `hal_utils.sh` | Sourced library: `hal::str::*`, `hal::arr::*`, `hal::fs::*`, `hal::log::*`. Has a double-source guard (`_HAL_UTILS_LOADED`). |
 | `env.sh` | Activation script — `source env.sh` to load the library and add the directory to `PATH`. Calls `validate.sh` first. |
-| `hal.sh` | Navigate HAL JSON/YAML/XML documents: interactive or `hal.sh <file> links|embeddeds|properties|docs [path…]`. |
-| `hallink.sh` | Resolve a HAL link object's `href`, expanding URI templates. Two modes: `--link <obj>` or `<file> <hal-path>`. |
+| `hal.sh` | Navigate HAL JSON/YAML/XML documents: interactive or `hal.sh <file> links\|embeddeds\|properties\|docs [path…]`. Array selection in a path: a numeric segment is an index; for `links` a bare segment matches the element's `name`; for `embeddeds`/`properties` a `field=value` segment selects the element whose field (rendered raw, so numbers/strings both match by literal text) equals the value — unmatched selectors exit 1. Interactively, link arrays are picked from a `name`-labelled menu; embedded-resource and property arrays first prompt for a field to select by (or index), then list elements by that field's value; scalar arrays are picked by index. hal.sh does not accept template var bindings (a hallink.sh concept). |
+| `hallink.sh` | Resolve a HAL link object's `href`, expanding URI templates. Two modes: `--link <obj>` or `<file> <hal-path>`. Template var bindings follow a literal `--` separator and each must contain `=`; everything before `--` is the path (or, with `--link`, the link source), and without `--` there are no bindings. This keeps a path's `field=value` array selector (resolved by hal.sh) distinct from a template binding. A binding after `--` lacking `=`, or a stray arg before `--` in `--link` mode, is a usage error (exit 1). |
 | `haldoclink.sh` | Emit a documentation link `{"href":"<doc_url>","type":"text/html"}` for a CURIE-prefixed relation. Searches `_links.curies` from the deepest embedded resource up to the root. `<file> <hal-path>` only. |
 | `halprepend.sh` | Prepend a base string to a HAL link object's `href`. Two modes: `--link <obj>` or `<file> <hal-path>`. Format-preserving (JSON/YAML/XML). |
 | `httpreq.sh` | HTTP dispatcher. Invoked via method-named hardlinks (`GET`, `POST`, …) that all point to `.httpreq.sh`. Outputs a family of files: `<base>.body`, `<base>.headers`, `<base>.code`, `<base>.curl`, etc. |
@@ -54,8 +54,8 @@ The self-inflatable archive bundles every `*.sh` file; `setup.sh` runs post-extr
 handles all three formats), fall back to `jq` for JSON-only. The functional check `printf '{}' | yq '.'` is always
 included alongside `command -v yq` to guard against broken stubs. Format detection reads file content (never file extensions).
 
-**HAL path convention** — non-interactive traversal uses space-separated segments: `links <rel> [N]`, `embeddeds <rel> [N]`, `properties <key>`.
-Segments without `=` are path components; segments containing `=` are URI template variable bindings.
+**HAL path convention** — non-interactive traversal uses space-separated segments: `links <rel> [N|name]`, `embeddeds <rel> [N|field=value]`, `properties <key> [N|field=value]`.
+A numeric segment is an array index; for `links` a bare segment matches the element's `name`; for `embeddeds`/`properties` a `field=value` segment selects the matching array element. Template variable bindings are **not** part of the hal-path — they are a hallink.sh concept and live after a literal `--` separator (everything before `--` is the path, every arg after it must contain `=`). This is what lets a `field=value` selector in the path coexist with a `var=value` template binding without ambiguity.
 
 **Exit codes** — `hallink.sh` uses distinct codes: 1 usage, 2 file not found, 3 link not found/no href, 4 tool unavailable.
 `hal.sh` and most other scripts exit 1 for all errors.

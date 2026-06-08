@@ -2,14 +2,16 @@
 # hallink.sh — resolve a HAL link object's href, expanding URI templates
 #
 # Usage:
-#   hallink.sh --link [<json|xml|yaml>|@<file>] [var=value ...]
-#   hallink.sh --link                            [var=value ...]   (link from stdin)
-#   hallink.sh <file-or-basename> <hal-path> [var=value ...]
+#   hallink.sh --link [<json|xml|yaml>|@<file>] [-- var=value ...]
+#   hallink.sh --link                           [-- var=value ...]   (link from stdin)
+#   hallink.sh <file-or-basename> <hal-path>    [-- var=value ...]
 #
-# hal-path: links <rel> [N]
-#           embeddeds <rel> [N] links <rel2> [N2]
+# hal-path: links <rel> [N|name]
+#           embeddeds <rel> [N|field=value] links <rel2> [N2|name]
 #
-# Var bindings are distinguished from path segments by the presence of '=':
+# Template var bindings follow a literal '--' separator and must each contain
+# '='; everything before '--' is the path.  A 'field=value' segment in the path
+# (before '--') is an array selector handled by hal.sh, not a var binding:
 #   name=value   plain string
 #   name[]=value list append
 #   name[k]=v    map entry
@@ -31,11 +33,11 @@ _HALLINK_FMT="json"
 
 _hallink_usage() {
     local name; name="$(basename "$0")"
-    printf 'Usage: %s --link [<json>|@<file>] [var=val ...]\n' "$name" >&2
-    printf '       %s --link [var=val ...]              (link from stdin)\n' "$name" >&2
-    printf '       %s <file> <hal-path> [var=val ...]\n' "$name" >&2
-    printf '\nhal-path: links <rel> [N]\n' >&2
-    printf '          embeddeds <rel> [N] links <rel2> [N2]\n' >&2
+    printf 'Usage: %s --link [<json>|@<file>] [-- var=val ...]\n' "$name" >&2
+    printf '       %s --link [-- var=val ...]            (link from stdin)\n' "$name" >&2
+    printf '       %s <file> <hal-path> [-- var=val ...]\n' "$name" >&2
+    printf '\nhal-path: links <rel> [N|name]\n' >&2
+    printf '          embeddeds <rel> [N|field=value] links <rel2> [N2|name]\n' >&2
 }
 
 # _hallink_resolve_file <spec>
@@ -167,25 +169,42 @@ _file=""
 _path=()
 _bindings=()
 
+# Path segments and template var bindings are separated by a literal '--':
+# everything before it is the path (or, in --link mode, the link source),
+# everything after it is a var binding and must contain '='.  Without a '--'
+# there are no bindings.
 if [[ "$1" == "--link" ]]; then
     _mode=link
     shift
-    # Consume next arg as link source only if it looks like a link:
-    # starts with { [ < @ (JSON/XML/file-ref), or is plain text without '='
-    # (bare YAML). An arg containing '=' is a var binding, not a link.
-    if [[ $# -gt 0 && "$1" != -* ]]; then
-        case "$1" in
-            '{'*|'['*|'<'*|@*) _link_src="$1"; shift ;;
-            *=*) : ;;   # var binding — don't consume
-            *) _link_src="$1"; shift ;;
-        esac
+    # The first arg (unless it is the '--' separator) is the link source.
+    if [[ $# -gt 0 && "$1" != "--" ]]; then
+        _link_src="$1"; shift
     fi
-    _bindings=("$@")
+    if [[ $# -gt 0 ]]; then
+        [[ "$1" == "--" ]] || {
+            printf 'hallink: unexpected argument: %s (bindings must follow --)\n' "$1" >&2; exit 1; }
+        shift
+        for _arg in "$@"; do
+            [[ "$_arg" == *=* ]] || {
+                printf 'hallink: binding after -- must be var=value: %s\n' "$_arg" >&2; exit 1; }
+            _bindings+=("$_arg")
+        done
+    fi
 else
     _mode=file
     _file="$1"; shift
+    _seen_sep=0
     for _arg in "$@"; do
-        [[ "$_arg" == *=* ]] && _bindings+=("$_arg") || _path+=("$_arg")
+        if [[ "$_seen_sep" -eq 0 && "$_arg" == "--" ]]; then
+            _seen_sep=1; continue
+        fi
+        if [[ "$_seen_sep" -eq 1 ]]; then
+            [[ "$_arg" == *=* ]] || {
+                printf 'hallink: binding after -- must be var=value: %s\n' "$_arg" >&2; exit 1; }
+            _bindings+=("$_arg")
+        else
+            _path+=("$_arg")
+        fi
     done
 fi
 

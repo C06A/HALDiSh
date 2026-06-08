@@ -787,8 +787,9 @@ _brow_follow_link() {
     [[ -n "$link_idx" ]] && halpath+=("$link_idx")
     # Reference the source resource's captured base: hallink.sh "${_b[<N>]}.body"
     local src_cmd="hallink.sh \"\${_b[${src_base}]}.body\" $(_brow_qargs "${halpath[@]}")"
+    # Template var bindings follow a literal '--' separator (hallink.sh requires it).
     [[ ${#_BROW_LAST_BINDINGS[@]} -gt 0 ]] && \
-        src_cmd+=" $(_brow_qargs "${_BROW_LAST_BINDINGS[@]}")"
+        src_cmd+=" -- $(_brow_qargs "${_BROW_LAST_BINDINGS[@]}")"
     local invoke
     invoke=$(_brow_invoke_name "$method")
     local req_cmd="${src_cmd}"$'\n'"${invoke} --link"

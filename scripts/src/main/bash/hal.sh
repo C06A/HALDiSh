@@ -2,11 +2,16 @@
 # hal.sh — navigate and extract from HAL JSON/YAML/XML documents
 #
 # Usage:
-#   hal.sh <file>                                  interactive
-#   hal.sh <file> links [rel [N|name] [field]]     non-interactive
-#   hal.sh <file> embeddeds [rel [N] [args...]]    non-interactive
-#   hal.sh <file> properties [key [args...]]       non-interactive
-#   hal.sh <file> docs [rel]                       non-interactive: list/expand CURI doc URLs
+#   hal.sh <file>                                       interactive
+#   hal.sh <file> links [rel [N|name] [field]]          non-interactive
+#   hal.sh <file> embeddeds [rel [N|f=v] [args...]]     non-interactive
+#   hal.sh <file> properties [key [N|f=v] [args...]]    non-interactive
+#   hal.sh <file> docs [rel]                            non-interactive: list/expand CURI doc URLs
+#
+# Array selection: a numeric segment is an index.  For links a bare segment
+# matches the element's "name"; for embeddeds/properties a "field=value" segment
+# selects the element whose field renders equal to value.  (Template var
+# bindings are a hallink.sh concept and are not accepted here.)
 #
 # Requires: yq (mikefarah/yq v4), or jq for JSON files
 set -euo pipefail
@@ -139,6 +144,22 @@ _qn() {
     fi
 }
 
+# _find_by_field <json-array> <field> <value>  → index of the first element whose
+# <field> renders equal to <value>, or nothing (returns 1) when none match.
+# Comparison is on the raw scalar rendering of the field (via _qkr), so string
+# and numeric fields both match by their literal text and the check is
+# tool-agnostic.
+_find_by_field() {
+    local array="$1" field="$2" value="$3"
+    local count i fval
+    count=$(_qr "$array" 'length')
+    for (( i = 0; i < count; i++ )); do
+        fval=$(_qkr "$(_qi "$array" "$i")" "$field")
+        [[ "$fval" == "$value" ]] && { printf '%s' "$i"; return 0; }
+    done
+    return 1
+}
+
 _usage() {
     printf 'Usage: %s <file> [links|embeddeds|properties|docs [...]]\n' "$(basename "$0")" >&2
 }
@@ -183,8 +204,16 @@ _traverse_value() {
             local elem
             elem=$(_qi "$val" "$arg")
             _traverse_value "$elem" "$@"
+        elif [[ "$arg" == *=* ]]; then
+            local idx
+            if ! idx=$(_find_by_field "$val" "${arg%%=*}" "${arg#*=}"); then
+                printf 'hal: no element where %s\n' "$arg" >&2; exit 1
+            fi
+            local elem
+            elem=$(_qi "$val" "$idx")
+            _traverse_value "$elem" "$@"
         else
-            printf 'hal: expected array index, got: %s\n' "$arg" >&2; exit 1
+            printf 'hal: expected array index or field=value, got: %s\n' "$arg" >&2; exit 1
         fi
     elif [[ "$vtype" == "object" ]]; then
         local sub
@@ -256,9 +285,19 @@ _traverse() {
             item=$(_qk "$embedded" "$rel")
             local itype
             itype=$(_qtype "$item")
-            if [[ "$itype" == "array" ]]; then
-                if [[ $# -gt 0 && "$1" =~ ^[0-9]+$ ]]; then
+            if [[ "$itype" == "array" && $# -gt 0 ]]; then
+                # A numeric segment is an index; a "field=value" segment selects
+                # the matching element.  A bare segment is left for the recursive
+                # _traverse below (it is a sub-command, not a selector).
+                if [[ "$1" =~ ^[0-9]+$ ]]; then
                     local idx="$1"; shift
+                    item=$(_qi "$item" "$idx")
+                elif [[ "$1" == *=* ]]; then
+                    local sel="$1"; shift
+                    local idx
+                    if ! idx=$(_find_by_field "$item" "${sel%%=*}" "${sel#*=}"); then
+                        printf 'hal: no embedded where %s\n' "$sel" >&2; exit 1
+                    fi
                     item=$(_qi "$item" "$idx")
                 fi
             fi

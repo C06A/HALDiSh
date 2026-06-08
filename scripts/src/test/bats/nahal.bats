@@ -932,7 +932,7 @@ _make_pass_plugin() {
     [ "$status" -eq 0 ]
     local s
     s=$(ls -d "${WORK_DIR}"/nahal_*/session.sh | head -1)
-    grep -qF 'hallink.sh "${_b[1]}.body" links search term=hello' "$s"
+    grep -qF 'hallink.sh "${_b[1]}.body" links search -- term=hello' "$s"  # binding after --
     grep -qF '# follow links search term=hello' "$s"   # path + binding in the comment
 }
 
