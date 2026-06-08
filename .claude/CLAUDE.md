@@ -32,40 +32,15 @@ The self-inflatable archive bundles every `*.sh` file; `setup.sh` runs post-extr
 
 | Script | Role |
 |---|---|
-| `hal_utils.sh` | Sourced library: `hal::str::*`, `hal::arr::*`, `hal::fs::*`, `hal::log::*`.
- Has a double-source guard (`_HAL_UTILS_LOADED`). |
+| `hal_utils.sh` | Sourced library: `hal::str::*`, `hal::arr::*`, `hal::fs::*`, `hal::log::*`. Has a double-source guard (`_HAL_UTILS_LOADED`). |
 | `env.sh` | Activation script — `source env.sh` to load the library and add the directory to `PATH`. Calls `validate.sh` first. |
-| `hal.sh` | Navigate HAL JSON/YAML/XML documents: interactive or `hal.sh <file> links|embeddeds|properties|docs [path…]`.
- Array selection: a non-interactive `links <rel> <N\|name>` segment is a numeric index or, otherwise,
- a match on the element's `name` (unmatched name exits 1).
- Interactively, link arrays are picked from a `name`-labelled menu;
- embedded-resource and property arrays first prompt for a field to select by (or index), then list elements by that field's value;
- scalar arrays are picked by index. All pickers resolve to the numeric index so recorded paths/jpaths stay valid. |
+| `hal.sh` | Navigate HAL JSON/YAML/XML documents: interactive or `hal.sh <file> links|embeddeds|properties|docs [path…]`. |
 | `hallink.sh` | Resolve a HAL link object's `href`, expanding URI templates. Two modes: `--link <obj>` or `<file> <hal-path>`. |
-| `haldoclink.sh` | Emit a documentation link `{"href":"<doc_url>","type":"text/html"}` for a CURIE-prefixed relation.
- Searches `_links.curies` from the deepest embedded resource up to the root. `<file> <hal-path>` only. |
-| `halprepend.sh` | Prepend a base string to a HAL link object's `href`. Two modes: `--link <obj>` or `<file> <hal-path>`.
- Format-preserving (JSON/YAML/XML). |
-| `httpreq.sh` | HTTP dispatcher. Invoked via method-named hardlinks (`GET`, `POST`, …) that all point to `.httpreq.sh`.
- Outputs a family of files: `<base>.body`, `<base>.headers`, `<base>.code`, `<base>.curl`, etc. |
+| `haldoclink.sh` | Emit a documentation link `{"href":"<doc_url>","type":"text/html"}` for a CURIE-prefixed relation. Searches `_links.curies` from the deepest embedded resource up to the root. `<file> <hal-path>` only. |
+| `halprepend.sh` | Prepend a base string to a HAL link object's `href`. Two modes: `--link <obj>` or `<file> <hal-path>`. Format-preserving (JSON/YAML/XML). |
+| `httpreq.sh` | HTTP dispatcher. Invoked via method-named hardlinks (`GET`, `POST`, …) that all point to `.httpreq.sh`. Outputs a family of files: `<base>.body`, `<base>.headers`, `<base>.code`, `<base>.curl`, etc. |
 | `uritemplate.sh` | RFC 6570 URI template expansion. Called as a subprocess by `hal.sh` and `hallink.sh`. |
-| `nahal.sh` | Interactive HAL API browser. Fetches with the method commands, classifies responses by Content-Type,
- and navigates links/embeddeds/properties/docs — and arrays of resources — via `hal.sh`.
- The links menu lists rels by local name (curie prefix stripped, duplicates grouped, disambiguated on select) unless `-c on`/`NAHAL_CURIES` shows full prefixed rels; the reserved `curies` array is never listed and the real rel key is always what's followed/logged (`-c` accepts on|off|true|false, overrides the env var, invalid → exit 2).
- Follows links with any HTTP method (HEAD/custom verbs via an on-demand `./<METHOD>` link).
- Renames each response via `rename.sh -p <prefix>` (user prefix from `-p` or a prompt)
- and logs a re-runnable `session.sh` whose steps capture each base into a `_b[]` array as a multi-line `_b[N]=$( … )`
- — one stage per indented line, `\`-continued (a leading `\|` after a bare newline is a Bash syntax error),
- with the `HTTP_IN_HEADERS=…` header a command-prefix on the method stage (no grouping subshells).
- `HTTP_IN_HEADERS` is emitted only for headers the link cannot supply — `httpreq.sh --link` derives `Accept` from the link's `type`,
- so the sole `Accept` written is on the initial bare-URL `GET`, plus `Content-Type` for body requests.
- The base-name prefix is set once into `$_prefix` in the header and each step's `rename.sh -p "$_prefix"` reuses it;
- at replay it can be overridden by `session.sh -p <prefix>` (wins) or an exported `HAL_FILE_PREFIX` (set-but-empty honored),
- else the baked value — bad args print usage and exit 2. The replay opens with a bootstrap that self-activates the HALDiSh environment
- (uses it if on `PATH`, else sources `env.sh` from `$HAL_LIB_DIR` or `~/.local/lib/haldish`, else prints install instructions and exits).
- Every followed link — and a resolved CURIE doc link before its page is opened — is run through `HAL_LINK_PLUGIN`
- (the doc link is the curie object with its `{rel}` href expanded). Records the `HAL_LINK_PLUGIN` list
- at session creation and emits a `_check_plugins` that diffs it against the replay-time list (OK = in both, INFO = new, WARN = missing). |
+| `nahal.sh` | Interactive HAL API browser. Fetches with the method commands, classifies responses by Content-Type, and navigates links/embeddeds/properties/docs — and arrays of resources — via `hal.sh`. Follows links with any HTTP method (HEAD/custom verbs via an on-demand `./<METHOD>` link). Renames each response via `rename.sh -p <prefix>` (user prefix from `-p` or a prompt) and logs a re-runnable `session.sh` whose steps capture each base into a `_b[]` array as a multi-line `_b[N]=$( … )` — one stage per indented line, `\`-continued (a leading `\|` after a bare newline is a Bash syntax error), with the `HTTP_IN_HEADERS=…` header a command-prefix on the method stage (no grouping subshells). `HTTP_IN_HEADERS` is emitted only for headers the link cannot supply — `httpreq.sh --link` derives `Accept` from the link's `type`, so the sole `Accept` written is on the initial bare-URL `GET`, plus `Content-Type` for body requests. The base-name prefix is set once into `$_prefix` in the header and each step's `rename.sh -p "$_prefix"` reuses it; at replay it can be overridden by `session.sh -p <prefix>` (wins) or an exported `HAL_FILE_PREFIX` (set-but-empty honored), else the baked value — bad args print usage and exit 2. The replay opens with a bootstrap that self-activates the HALDiSh environment (uses it if on `PATH`, else sources `env.sh` from `$HAL_LIB_DIR` or `~/.local/lib/haldish`, else prints install instructions and exits). Every followed link — and a resolved CURIE doc link before its page is opened — is run through `HAL_LINK_PLUGIN` (the doc link is the curie object with its `{rel}` href expanded). Records the `HAL_LINK_PLUGIN` list at session creation and emits a `_check_plugins` that diffs it against the replay-time list (OK = in both, INFO = new, WARN = missing). |
 | `menu.sh` | Single-keypress interactive selector. Reads from fd 3 (`_MENU_TTY` env var overrides). |
 | `prettyprint.sh` | Detects content type of `<base>.body` and reformats it as JSON/YAML/XML. |
 | `adoc.sh` | Wraps file groups into AsciiDoc tagged regions for inclusion in docs. `[<base>...] [-- <ext>...]`: an extension list after `--` documents only those extensions (leading dot optional; no `--` = all); a requested extension with no `<base>.<ext>` file warns per base but exits 0. |
