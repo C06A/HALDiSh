@@ -61,13 +61,16 @@ readonly _BROW_NAV=$'\001'
 
 # ── session state ─────────────────────────────────────────────────────────────
 
-_BROW_TOOL=''        # yq or jq
-_BROW_OUTDIR=''      # directory for HTTP response files
-_BROW_LOG=''         # path to session log script
-_BROW_STEP=0         # request counter
-_BROW_LAST_BASE=''   # base name of last response file set
+_BROW_TOOL=''            # yq or jq
+_BROW_OUTDIR=''          # directory for HTTP response files
+_BROW_LOG=''             # path to session log script
+_BROW_STEP=0             # request counter
+_BROW_LAST_BASE=''       # base name of last response file set
 _BROW_LAST_BINDINGS=()   # uritemplate var=value bindings from the last expansion
 _BROW_LAST_URL=''        # expanded URL from the last _brow_expand_vars call
+_BROW_REQ_HALLINK=()     # hallink.sh args for the next link request (live)
+_BROW_REQ_BODY=()        # method body flags for the next link request (live)
+_BROW_REQ_CT=''          # Content-Type to set for the next link request (live)
 _BROW_PREFIX=''          # user-provided base-name prefix for response files (-p)
 _BROW_PREFIX_SET=0       # 1 when -p was supplied, so the prompt is skipped
 _BROW_SHOW_CURIES=false  # links menu: true = full prefixed rels, false = local names (-c / NAHAL_CURIES)
@@ -263,15 +266,19 @@ _brow_hdr_value() {
 # the response capture, laid out one stage per line inside a command
 # substitution:
 #   _b[<N>]=$(
-#     HTTP_IN_HEADERS="…" \
-#     <method> <args> \
-#     | rename.sh -p "$_prefix"
+#     _s=$(hal_basename.sh -p "$_prefix")
+#     hallink.sh -s "$_s" "${_b[M]}.body" <path> \
+#     | HTTP_IN_HEADERS="…" \
+#       <method> -s "$_s" --link
 #   )
-# The prefix is taken from the $_prefix variable set once in the session header.
-# The header (when any) is emitted as a leading, line-continued assignment on the
-# method stage — the last request stage — because a standalone assignment is not
-# exported to the piped command.  <request-cmd> holds the request stages
-# newline-separated, e.g. 'hallink.sh "${_b[1]}.body" links x'$'\n''GET --link'.
+# The base name is numbered once into $_s by hal_basename.sh (prefix from the
+# $_prefix variable set in the session header) and reused by both hallink.sh and
+# the method via -s, so the response files land under the predictable name with
+# no rename.  The header (when any) is emitted as a leading, line-continued
+# assignment on the method stage — the last request stage — because a standalone
+# assignment is not exported to the piped command.  <request-cmd> holds the
+# request stages newline-separated, each already carrying its -s "$_s", e.g.
+# 'hallink.sh -s "$_s" "${_b[1]}.body" links x'$'\n''GET -s "$_s" --link'.
 _brow_log_step() {
     local hdr="$1" invoke="$2" cmd="$3" label="$4"
 
@@ -284,13 +291,14 @@ _brow_log_step() {
     while IFS= read -r line; do segs+=("$line"); done <<< "$cmd"
     # The method stage (which carries the header) is the last request stage.
     local _method_idx=$(( ${#segs[@]} - 1 ))
-    segs+=('rename.sh -p "$_prefix"')   # _prefix is set once in the session header
 
-    # Emit the capture: "$(" opens on its own line, ")" closes on its own; each
-    # stage is indented, piped (after the first), and "\"-continued except the
-    # last.  The method stage's header is a separate, continued assignment line.
+    # Emit the capture: "$(" opens on its own line, ")" closes on its own.  The
+    # base is numbered first, then each request stage is indented, piped (after
+    # the first), and "\"-continued except the last.  The method stage's header
+    # is a separate, continued assignment line.
     local i pipe last=$(( ${#segs[@]} - 1 ))
     printf '_b[%s]=$(\n' "$_BROW_STEP" >> "$_BROW_LOG"
+    printf '  _s=$(hal_basename.sh -p "$_prefix")\n' >> "$_BROW_LOG"
     for (( i = 0; i <= last; i++ )); do
         (( i == 0 )) && pipe='' || pipe='| '
         if (( i == _method_idx )) && [[ -n "$hdr" ]]; then
@@ -351,7 +359,9 @@ _brow_invoke_name() {
 # ── HTTP request ──────────────────────────────────────────────────────────────
 
 # _brow_do_request <method> <url> <accept> [body-flags...]
-# Sets _BROW_LAST_BASE.  Returns 1 on curl failure.
+# Bare-URL request (the session start).  Sets _BROW_LAST_BASE.  Returns 1 on
+# failure.  Names the response files up front with hal_basename.sh -s, exactly as
+# the generated session.sh replay does, so the live directory matches (no rename).
 _brow_do_request() {
     local method="$1" url="$2" accept="$3"
     shift 3
@@ -365,14 +375,55 @@ _brow_do_request() {
     invoke=$(_brow_invoke_name "$method")
     [[ "$invoke" == ./* ]] && _brow_link_method "$method"
 
-    # Rename the response files using the user prefix, exactly as the generated
-    # session.sh replay does, so the live session directory matches.  Accept is a
-    # command-prefix on the method (a standalone assignment is not exported).
+    # Number the base once, then send.  Accept is a command-prefix on the method
+    # (a standalone assignment is not exported).
     local base='' rc=0
     set +e
-    base=$(cd "$_BROW_OUTDIR" \
-        && HTTP_IN_HEADERS="Accept:${accept}" "$invoke" "$url" "$@" 2>/dev/null \
-        | rename.sh -p "$_BROW_PREFIX" 2>/dev/null)
+    base=$(cd "$_BROW_OUTDIR" || exit 1
+        _s=$(hal_basename.sh -p "$_BROW_PREFIX") || exit 1
+        HTTP_IN_HEADERS="Accept:${accept}" "$invoke" -s "$_s" "$url" "$@" 2>/dev/null)
+    rc=$?
+    set -e
+
+    if [[ -z "$base" ]]; then
+        hal::log::error "Request failed (exit ${rc})"
+        return 1
+    fi
+
+    local status
+    status=$(cat "${_BROW_OUTDIR}/${base}.status" 2>/dev/null || printf '???')
+    hal::log::info "  HTTP ${status} — ${base}.{status,headers,body}"
+    _BROW_LAST_BASE="$base"
+}
+
+# _brow_do_link_request <method> <display>
+# Link request, unified with the replay pipeline: number the base, resolve and
+# record the link with hallink.sh -s (which writes the .source/.halpath/.bindings
+# sidecars), and send it with the method reading the link via --link.  Inputs are
+# the globals _BROW_REQ_HALLINK (hallink args), _BROW_REQ_BODY (method body flags)
+# and _BROW_REQ_CT (Content-Type, or empty).  Sets _BROW_LAST_BASE; returns 1 on
+# failure.
+_brow_do_link_request() {
+    local method="$1" display="$2"
+    _BROW_STEP=$(( _BROW_STEP + 1 ))
+    hal::log::info "Step ${_BROW_STEP}: ${method} ${display}"
+
+    local invoke
+    invoke=$(_brow_invoke_name "$method")
+    [[ "$invoke" == ./* ]] && _brow_link_method "$method"
+
+    local base='' rc=0
+    set +e
+    base=$(cd "$_BROW_OUTDIR" || exit 1
+        _s=$(hal_basename.sh -p "$_BROW_PREFIX") || exit 1
+        if [[ -n "$_BROW_REQ_CT" ]]; then
+            hallink.sh -s "$_s" "${_BROW_REQ_HALLINK[@]}" 2>/dev/null \
+                | HTTP_IN_HEADERS="Content-Type:${_BROW_REQ_CT}" \
+                  "$invoke" -s "$_s" --link ${_BROW_REQ_BODY[@]+"${_BROW_REQ_BODY[@]}"} 2>/dev/null
+        else
+            hallink.sh -s "$_s" "${_BROW_REQ_HALLINK[@]}" 2>/dev/null \
+                | "$invoke" -s "$_s" --link ${_BROW_REQ_BODY[@]+"${_BROW_REQ_BODY[@]}"} 2>/dev/null
+        fi)
     rc=$?
     set -e
 
@@ -774,25 +825,35 @@ _brow_follow_link() {
     local body_args=()
     [[ ${#_BROW_REQ_BODY_ARGS[@]} -gt 0 ]] && body_args=("${_BROW_REQ_BODY_ARGS[@]}")
 
-    # Make the request
-    if ! _brow_do_request "$method" "$url" "$accept" ${body_args[@]+"${body_args[@]}"}; then
+    # The hal-path from the source resource (the current nav path) down to this
+    # link — used for both the live request and the replay log.
+    local -a halpath=(${_BROW_NAV_PATH[@]+"${_BROW_NAV_PATH[@]}"} links "$rel")
+    [[ -n "$link_idx" ]] && halpath+=("$link_idx")
+
+    # Make the request, mirroring the replay exactly: hallink.sh -s resolves the
+    # link from the source body at this path (writing the .source/.halpath/
+    # .bindings sidecars) and the method sends it via --link.
+    _BROW_REQ_HALLINK=("${_BROW_LAST_BASE}.body" "${halpath[@]}")
+    [[ ${#_BROW_LAST_BINDINGS[@]} -gt 0 ]] && \
+        _BROW_REQ_HALLINK+=(-- "${_BROW_LAST_BINDINGS[@]}")
+    _BROW_REQ_BODY=(${body_args[@]+"${body_args[@]}"})
+    _BROW_REQ_CT=$(_brow_infer_content_type ${body_args[@]+"${body_args[@]}"})
+    if ! _brow_do_link_request "$method" "${method} ${url}"; then
         hal::log::warn "Request failed — staying on current resource"
         return 1
     fi
 
     # Log the replay step: hallink re-extracts (and re-expands) this link from the
     # source resource's body at the current navigation path; the method sends it
-    # via --link; rename gives the response files the predictable step name.
-    local -a halpath=(${_BROW_NAV_PATH[@]+"${_BROW_NAV_PATH[@]}"} links "$rel")
-    [[ -n "$link_idx" ]] && halpath+=("$link_idx")
+    # via --link.  Both share the base numbered into $_s, so no rename is needed.
     # Reference the source resource's captured base: hallink.sh "${_b[<N>]}.body"
-    local src_cmd="hallink.sh \"\${_b[${src_base}]}.body\" $(_brow_qargs "${halpath[@]}")"
+    local src_cmd="hallink.sh -s \"\$_s\" \"\${_b[${src_base}]}.body\" $(_brow_qargs "${halpath[@]}")"
     # Template var bindings follow a literal '--' separator (hallink.sh requires it).
     [[ ${#_BROW_LAST_BINDINGS[@]} -gt 0 ]] && \
         src_cmd+=" -- $(_brow_qargs "${_BROW_LAST_BINDINGS[@]}")"
     local invoke
     invoke=$(_brow_invoke_name "$method")
-    local req_cmd="${src_cmd}"$'\n'"${invoke} --link"
+    local req_cmd="${src_cmd}"$'\n'"${invoke} -s \"\$_s\" --link"
     [[ ${#body_args[@]} -gt 0 ]] && req_cmd+=" $(_brow_qargs "${body_args[@]}")"
     # Label the step with the whole HAL path to the link (including any embeddeds
     # segments traversed to reach it) plus the var=value bindings used to expand
@@ -1679,27 +1740,29 @@ _brow_do_request "GET" "$start_url" "$accept"
 
 # Log the initial step, reproducing the original nahal.sh invocation: a bare GET
 # for a URL start, or hallink.sh (--link for a link/file start) piped to GET --link.
+# Every stage carries -s "$_s" so the response (and any sidecar) lands under the
+# base numbered once by hal_basename.sh — no rename.
 _brow_initial_cmd=""
 _brow_initial_hdr=""
 case "$_BROW_START_MODE" in
     url)
-        _brow_initial_cmd="GET $(_brow_qargs "${_BROW_START_ARGS[@]}")"
+        _brow_initial_cmd="GET -s \"\$_s\" $(_brow_qargs "${_BROW_START_ARGS[@]}")"
         # Bare URL GET — there is no link for httpreq.sh to read Accept from, so
         # request a HAL response explicitly (this is the one place we set Accept).
         _brow_initial_hdr="Accept:${_BROW_HAL_ACCEPT}"
         ;;
     link)
-        _brow_initial_cmd="hallink.sh --link $(_brow_qargs "${_BROW_START_ARGS[@]}")"
+        _brow_initial_cmd="hallink.sh -s \"\$_s\" --link $(_brow_qargs "${_BROW_START_ARGS[@]}")"
         [[ ${#_BROW_LAST_BINDINGS[@]} -gt 0 ]] && \
-            _brow_initial_cmd+=" $(_brow_qargs "${_BROW_LAST_BINDINGS[@]}")"
-        _brow_initial_cmd+=$'\n'"GET --link"
+            _brow_initial_cmd+=" -- $(_brow_qargs "${_BROW_LAST_BINDINGS[@]}")"
+        _brow_initial_cmd+=$'\n'"GET -s \"\$_s\" --link"
         _brow_initial_hdr="$(_brow_req_headers "$_BROW_START_LINK_JSON")"
         ;;
     file)
-        _brow_initial_cmd="hallink.sh $(_brow_qargs "${_BROW_START_ARGS[@]}")"
+        _brow_initial_cmd="hallink.sh -s \"\$_s\" $(_brow_qargs "${_BROW_START_ARGS[@]}")"
         [[ ${#_BROW_LAST_BINDINGS[@]} -gt 0 ]] && \
-            _brow_initial_cmd+=" $(_brow_qargs "${_BROW_LAST_BINDINGS[@]}")"
-        _brow_initial_cmd+=$'\n'"GET --link"
+            _brow_initial_cmd+=" -- $(_brow_qargs "${_BROW_LAST_BINDINGS[@]}")"
+        _brow_initial_cmd+=$'\n'"GET -s \"\$_s\" --link"
         _brow_initial_hdr="$(_brow_req_headers "$_BROW_START_LINK_JSON")"
         ;;
 esac

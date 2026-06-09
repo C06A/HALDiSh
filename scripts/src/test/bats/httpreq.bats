@@ -663,3 +663,102 @@ MOCK
     # .curl stores shell-quoted args; the space in the header value is backslash-escaped
     grep -qF 'Accept:application/hal+json' "${WORK_DIR}/${output}.curl"
 }
+
+# ── -s basename override ──────────────────────────────────────────────────────
+
+@test "httpreq: -s sets the output base name and is printed on stdout" {
+    _run_req GET 'https://example.com/' -s mybase
+    [ "$status" -eq 0 ]
+    [ "$output" = 'mybase' ]
+}
+
+@test "httpreq: -s writes the output files under the given base name" {
+    _run_req GET 'https://example.com/' -s mybase
+    [ "$status" -eq 0 ]
+    [ -f "${WORK_DIR}/mybase.body" ]
+    [ -f "${WORK_DIR}/mybase.code" ]
+    [ -f "${WORK_DIR}/mybase.headers" ]
+}
+
+@test "httpreq: -s may precede the URL (flags in any order)" {
+    _run_req GET -s mybase 'https://example.com/'
+    [ "$status" -eq 0 ]
+    [ "$output" = 'mybase' ]
+    _curl_has 'https://example.com/'
+}
+
+@test "httpreq: -s interleaved with body flags and --link" {
+    _run_req POST -a 'k=v' -s mybase --link '{"href":"https://example.com/"}'
+    [ "$status" -eq 0 ]
+    [ "$output" = 'mybase' ]
+    _curl_has 'https://example.com/'
+    _curl_has_seq --data 'k=v'
+}
+
+@test "httpreq: -s without a basename argument exits non-zero" {
+    _run_req GET 'https://example.com/' -s
+    [ "$status" -ne 0 ]
+}
+
+@test "httpreq: -s specified twice exits non-zero" {
+    _run_req GET 'https://example.com/' -s a -s b
+    [ "$status" -ne 0 ]
+}
+
+# ── single-occurrence and URL-source validation ───────────────────────────────
+
+@test "httpreq: -i specified twice exits non-zero" {
+    _run_req GET 'https://example.com/' -i -i
+    [ "$status" -ne 0 ]
+}
+
+@test "httpreq: a URL plus --link exits non-zero (two URL sources)" {
+    _run_req GET 'https://example.com/' --link '{"href":"https://x/"}'
+    [ "$status" -ne 0 ]
+}
+
+@test "httpreq: a URL plus -- exits non-zero (two URL sources)" {
+    _run_req GET 'https://example.com/' --
+    [ "$status" -ne 0 ]
+}
+
+@test "httpreq: --link plus -- exits non-zero (two URL sources)" {
+    _run_req GET --link '{"href":"https://x/"}' --
+    [ "$status" -ne 0 ]
+}
+
+@test "httpreq: an unknown flag exits non-zero" {
+    _run_req GET 'https://example.com/' -Z
+    [ "$status" -ne 0 ]
+}
+
+# ── body-method mutual exclusivity ────────────────────────────────────────────
+
+@test "httpreq: -a and -u together exit non-zero (conflicting body flags)" {
+    _run_req POST 'https://example.com/' -a 'k=v' -u 'q=x'
+    [ "$status" -ne 0 ]
+}
+
+@test "httpreq: -a repeated exits non-zero (only one body method)" {
+    _run_req POST 'https://example.com/' -a 'one' -a 'two'
+    [ "$status" -ne 0 ]
+}
+
+@test "httpreq: -b and -r together exit non-zero (conflicting body flags)" {
+    printf 'x' > "${WORK_DIR}/f1"
+    printf 'y' > "${WORK_DIR}/f2"
+    _run_req PUT 'https://example.com/' -b "${WORK_DIR}/f1" -r "${WORK_DIR}/f2"
+    [ "$status" -ne 0 ]
+}
+
+@test "httpreq: -a and -f together exit non-zero (single body vs multipart)" {
+    printf 'x' > "${WORK_DIR}/upload.txt"
+    _run_req POST 'https://example.com/' -a 'k=v' -f "${WORK_DIR}/upload.txt"
+    [ "$status" -ne 0 ]
+}
+
+@test "httpreq: -f then -a exits non-zero (multipart then single body)" {
+    printf 'x' > "${WORK_DIR}/upload.txt"
+    _run_req POST 'https://example.com/' -f "${WORK_DIR}/upload.txt" -a 'k=v'
+    [ "$status" -ne 0 ]
+}

@@ -6,10 +6,11 @@
 #   rename.sh <new-name> [old-name]      # old-name read from stdin if omitted
 #   rename.sh -p <prefix> [old-name]     # new-name = <prefix><next number>
 #
-# In -p mode the new base name is <prefix> followed by one more than the largest
-# integer N among existing <prefix>N.* files in the current directory (1 when
-# none exist), so repeated runs keep appending without collisions.  An empty
-# prefix yields bare numbers (1.*, 2.*, …).
+# In -p mode the new base name is computed by hal_basename.sh -p <prefix>: it is
+# <prefix> followed by one more than the largest integer N among existing
+# <prefix>N.* files in the current directory (1 when none exist), so repeated
+# runs keep appending without collisions.  An empty prefix yields bare numbers
+# (1.*, 2.*, …).
 #
 # Finds all files matching <old-name>.* in the current directory and renames
 # them to <new-name>.<same-ext>.
@@ -36,19 +37,9 @@ if [[ "$1" == "-p" ]]; then
     [[ $# -ge 2 ]] || { _usage; exit 1; }
     prefix="$2"
     shift 2
-    # Next number = (largest N among existing <prefix>N.* files) + 1.  Matching
-    # is literal on the prefix (no glob surprises) and only a purely-numeric
-    # suffix counts, so unrelated files are ignored.
-    max=0
-    shopt -s nullglob
-    for f in *; do
-        [[ "$f" == "${prefix}"* ]] || continue
-        rest="${f#"$prefix"}"
-        num="${rest%%.*}"
-        [[ "$num" =~ ^[0-9]+$ ]] || continue
-        (( 10#$num > max )) && max=$(( 10#$num ))
-    done
-    new_name="${prefix}$(( max + 1 ))"
+    # Delegate the <prefix><N> numbering to hal_basename.sh, the single source of
+    # truth for that scheme (so this and nahal.sh can never disagree).
+    new_name="$(hal_basename.sh -p "$prefix")"
 else
     new_name="$1"
     shift

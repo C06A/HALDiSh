@@ -32,7 +32,15 @@ setup() {
 # Drain stdin in --link mode (like real httpreq.sh) so a `hallink | GET --link`
 # pipe doesn't break with SIGPIPE.
 case " $* " in *" --link "*) cat >/dev/null 2>&1 || true ;; esac
+# Honor -s <base> exactly like the real httpreq.sh: the caller (nahal.sh / the
+# replay) numbers the base via hal_basename.sh and passes it here, so the output
+# files land under the predictable name with no rename.
 base="resp"
+_prev=""
+for _a in "$@"; do
+    [[ "$_prev" == "-s" ]] && { base="$_a"; break; }
+    _prev="$_a"
+done
 ct="${MOCK_CT:-application/hal+json}"
 printf 'HTTP/1.1 200 OK\r\nContent-Type: %s\r\n\r\n' "$ct" > "${base}.headers"
 printf '200' > "${base}.status"
@@ -485,28 +493,30 @@ _src() {
     [[ "$output" != *"Accept:"* ]]
 }
 
-@test "_brow_log_step: custom method, inline header, array capture, prefix rename" {
+@test "_brow_log_step: custom method, inline header, array capture, hal_basename naming" {
     run bash -c '
         source "$1" >/dev/null 2>&1 || true
         _BROW_LOG="$2"; _BROW_STEP=3; _BROW_PREFIX=req
         : > "$2"
-        cmd="hallink.sh \"\${_b[2]}.body\" links self
-./HEAD --link"
+        cmd="hallink.sh -s \"\$_s\" \"\${_b[2]}.body\" links self
+./HEAD -s \"\$_s\" --link"
         _brow_log_step "Accept:x" "./HEAD" "$cmd" "follow"
         cat "$2"
     ' _ "$NAHAL_SH" "${WORK_DIR}/log"
     [[ "$output" == *"_ensure_method HEAD"* ]]
     [[ "$output" == *'HTTP_IN_HEADERS="Accept:x'* ]]
-    [[ "$output" == *"./HEAD --link"* ]]
-    [[ "$output" == *'rename.sh -p "$_prefix"'* ]]   # prefix via the shared variable
+    [[ "$output" == *'./HEAD -s "$_s" --link'* ]]
+    [[ "$output" == *'_s=$(hal_basename.sh -p "$_prefix")'* ]]   # base numbered once
     [[ "$output" == *'${_b[2]}.body'* ]]
+    [[ "$output" != *'rename.sh'* ]]                 # no rename — -s names the files
     [[ "$output" != *"(HTTP_IN_HEADERS"* ]]
     # Multi-line layout: "$(" opens its own line, ")" closes its own line, and
     # the piped/continued stages are indented.
     [[ "$output" == *$'_b[3]=$(\n'* ]]
     [[ "$output" == *$'\n)'* ]]
-    [[ "$output" == *$'\n  hallink.sh "${_b[2]}.body" links self \\\n'* ]]
-    [[ "$output" == *$'\n  | rename.sh -p "$_prefix"\n'* ]]
+    [[ "$output" == *$'  _s=$(hal_basename.sh -p "$_prefix")\n'* ]]
+    [[ "$output" == *$'\n  hallink.sh -s "$_s" "${_b[2]}.body" links self \\\n'* ]]
+    [[ "$output" == *$'\n  ./HEAD -s "$_s" --link\n'* ]]
 }
 
 # ── documentation (CURIE) ─────────────────────────────────────────────────────
@@ -599,7 +609,7 @@ CURI_RES='{"_links":{"self":{"href":"/r"},"curies":[{"name":"ex","href":"https:/
     [ "$status" -eq 0 ]
     [[ "$stderr" == *"Choose link"* ]]      # the array element picker appeared
     local s; s=$(ls -d "${WORK_DIR}"/nahal_*/session.sh | head -1)
-    grep -qF 'hallink.sh "${_b[1]}.body" links items 1' "$s"   # indexed hal-path
+    grep -qF 'hallink.sh -s "$_s" "${_b[1]}.body" links items 1' "$s"   # indexed hal-path
     grep -qF '# follow links items 1' "$s"                     # comment carries the index
     ! grep -qF 'links items 0' "$s"                            # the other element not followed
 }
@@ -754,7 +764,7 @@ _run_self_follow_session() {
     SESSION_DIR=$(ls -d "${WORK_DIR}"/nahal_* | head -1)
 }
 
-@test "session.sh: replay captures into _b[] and renames via rename.sh -p" {
+@test "session.sh: replay captures into _b[] and names files via hal_basename.sh -s" {
     _run_self_follow_session
     local s="${SESSION_DIR}/session.sh"
     [ -f "$s" ]
@@ -766,16 +776,15 @@ _run_self_follow_session() {
     # gets its Accept from the link via httpreq.sh, so no HTTP_IN_HEADERS there.
     [ "$(grep -c 'HTTP_IN_HEADERS=' "$s")" -eq 1 ]
     grep -qF '_prefix=step_' "$s"                # prefix set once in the header
-    grep -qF 'rename.sh -p "$_prefix"' "$s"      # each step renames via the variable
-    ! grep -qF 'rename.sh -p step_' "$s"         # not hardcoded per request
+    grep -qF '_s=$(hal_basename.sh -p "$_prefix")' "$s"  # base numbered per step
     grep -qF '# follow links self' "$s"          # step comment carries the full path
-    grep -qF 'hallink.sh "${_b[1]}.body" links self' "$s"  # follow reads _b[1]
-    grep -qF 'GET --link' "$s"                   # method consumes the link
+    grep -qF 'hallink.sh -s "$_s" "${_b[1]}.body" links self' "$s"  # follow reads _b[1]
+    grep -qF 'GET -s "$_s" --link' "$s"          # method consumes the link under the base
     grep -qF '_b[2]=$(' "$s"                     # follow captured as _b[2]
-    # Old forms must be gone: no grouping subshell, no dead _link= / step_N rename.
+    # Old forms must be gone: no rename, no grouping subshell, no dead _link=.
+    ! grep -qF 'rename.sh' "$s"
     ! grep -q '^(HTTP_IN_HEADERS' "$s"
     ! grep -qF '_link=$(' "$s"
-    ! grep -qF 'rename.sh step_' "$s"
 }
 
 @test "session.sh: replay re-runs and recreates the predictable step files" {
@@ -932,7 +941,7 @@ _make_pass_plugin() {
     [ "$status" -eq 0 ]
     local s
     s=$(ls -d "${WORK_DIR}"/nahal_*/session.sh | head -1)
-    grep -qF 'hallink.sh "${_b[1]}.body" links search -- term=hello' "$s"  # binding after --
+    grep -qF 'hallink.sh -s "$_s" "${_b[1]}.body" links search -- term=hello' "$s"  # binding after --
     grep -qF '# follow links search term=hello' "$s"   # path + binding in the comment
 }
 

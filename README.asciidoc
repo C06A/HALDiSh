@@ -361,10 +361,13 @@ usage and exits `2`.
 === Session directory
 
 Each run creates a `nahal_<timestamp>/` directory beside the working directory.
-Every request writes a file group there, renamed (via `rename.sh -p`) to
-`<prefix><N>` — `req1.body`, `req1.headers`, `req1.status`, … — where `<N>` is one
-past the largest existing `<prefix><N>` in the directory.  The session log is
-written to `nahal_<timestamp>/session.sh`.
+Each request's base name is chosen up front with `hal_basename.sh -p <prefix>` —
+`<prefix><N>`, where `<N>` is one past the largest existing `<prefix><N>` in the
+directory — and passed to the request via `-s`, so the file group lands directly
+under that name (`req1.body`, `req1.headers`, `req1.status`, …) with no rename.
+A followed link additionally writes `<base>.source`, `<base>.halpath`, and
+`<base>.bindings` recording the resource, path, and template bindings the request
+was built from.  The session log is written to `nahal_<timestamp>/session.sh`.
 
 === Response classification
 
@@ -420,11 +423,13 @@ percent-decoded.
 
 === Session replay
 
-`session.sh` reproduces the session without `nahal.sh`: each step extracts the
-next link with `hallink.sh`, sends it through the method command's `--link` mode,
-and renames the response files with `rename.sh -p`.  Each response base is
-captured into the `_b` array so later steps can reference the resource they were
-viewed in, and so re-running keeps appending (`<prefix>N+1`, …) without clobbering.
+`session.sh` reproduces the session without `nahal.sh`: each step numbers its
+response base with `hal_basename.sh -p`, extracts the next link with
+`hallink.sh -s`, and sends it through the method command's `--link` mode (also
+passing `-s`), so both the resolved link's sidecars and the response files land
+under that base — no rename.  Each response base is captured into the `_b` array
+so later steps can reference the resource they were viewed in, and so re-running
+keeps appending (`<prefix>N+1`, …) without clobbering.
 
 [source,bash]
 ----
@@ -433,24 +438,26 @@ _prefix=req   # response-file base-name prefix, set once and reused below
 
 # initial request
 _b[1]=$(
+  _s=$(hal_basename.sh -p "$_prefix")
   HTTP_IN_HEADERS="Accept:application/hal+json, …${HTTP_IN_HEADERS:+
 $HTTP_IN_HEADERS}" \
-  GET http://api.example.com/ \
-  | rename.sh -p "$_prefix"
+  GET -s "$_s" http://api.example.com/
 )
 
 # follow links orders
 _b[2]=$(
-  hallink.sh "${_b[1]}.body" links orders \
-  | GET --link \
-  | rename.sh -p "$_prefix"
+  _s=$(hal_basename.sh -p "$_prefix")
+  hallink.sh -s "$_s" "${_b[1]}.body" links orders \
+  | GET -s "$_s" --link
 )
 ----
 
 Each stage sits on its own indented line inside the `$(…)`, continued with `\`
-(a leading `|` after a bare newline is a Bash syntax error).  The base-name
-prefix is set once into `$_prefix` near the top of the script and referenced by
-every step's `rename.sh`.  That prefix can be overridden when replaying: a
+(a leading `|` after a bare newline is a Bash syntax error).  The base is
+numbered once per step into `$_s` (via `hal_basename.sh -p "$_prefix"`) and
+reused by both `hallink.sh` and the method through `-s`.  The prefix is set once
+into `$_prefix` near the top of the script.  That prefix can be overridden when
+replaying: a
 `-p <prefix>` argument to `session.sh` wins, otherwise an exported
 `HAL_FILE_PREFIX` (a set-but-empty value is honored), otherwise the value
 recorded at session creation.  An unknown option or stray argument prints a
@@ -502,9 +509,9 @@ Requires `yq` (mikefarah/yq v4) or `jq` for JSON; `uritemplate.sh` on PATH.
 
 [source,bash]
 ----
-hallink.sh --link [<json|xml|yaml>|@<file>] [-- var=value ...]
-hallink.sh --link                           [-- var=value ...]  # link from stdin
-hallink.sh <file-or-basename> <hal-path>    [-- var=value ...]
+hallink.sh [-s <base>] --link [<json|xml|yaml>|@<file>] [-- var=value ...]
+hallink.sh [-s <base>] --link                          [-- var=value ...]  # link from stdin
+hallink.sh [-s <base>] <file-or-basename> <hal-path>   [-- var=value ...]
 ----
 
 `hal-path`: `links <rel> [N|name]`  or  `embeddeds <rel> [N|field=value] links <rel2> [N2]`
@@ -514,6 +521,24 @@ hallink.sh <file-or-basename> <hal-path>    [-- var=value ...]
 
 File basenames (no `/`) are resolved in the current directory against the
 extensions `.json`, `.xml`, `.yaml`, `.yml`, `.body` in that order.
+
+`-s <base>` (which may appear anywhere before `--`: leading, after the
+`--link <src>`, or after `<file>`) additionally writes sidecar files recording
+how the link was located, all sharing the `<base>` name so a later rename moves
+them together with any response files:
+
+[cols="1,3",options="header"]
+|===
+|File |Contents
+
+|`<base>.source`  |The `<file>` argument as given (or an `@file` with `@`
+ stripped).  Omitted for an inline or stdin `--link`, which has no source file.
+|`<base>.halpath` |The hal-path segments, one per line (empty in `--link` mode).
+|`<base>.bindings`|The `var=value` template bindings, one per line (empty file
+ when there are none).
+|===
+
+Without `-s`, nothing extra is written and stdout is unchanged.
 
 Template variable bindings follow a literal `--` separator and each must
 contain `=`; everything before `--` is the path (or, with `--link`, the link
@@ -702,16 +727,33 @@ GET  --  [flags...]              # URL read from first stdin line
 GET  --link <json> [flags...]    # HAL link object: href → URL, type → Accept header
 GET  --link @<file> [flags...]   # HAL link from file
 GET  --link [flags...]           # HAL link from stdin
+GET  <url> -s <base> [flags...]  # write the output files under <base>
 ----
 
 `--link` extracts `href` as the request URL and, when the link object carries a
 `type` field, injects an `Accept: <type>` request header automatically.
 
+Arguments are parsed in a single pass and may appear in **any order** (e.g.
+`GET -a data -s req1 --link` is valid).  The rules:
+
+* Exactly one URL source — a bare `<url>`, `--` (URL from stdin), or `--link`.
+  Supplying more than one is an error.
+* `-s <base>` (at most once) names the output base; without it a unique
+  `<domain>_<timestamp-ms>` base is generated (which can be piped to `rename.sh`
+  for a predictable name).
+* `-i` may appear at most once.
+* The body-content flags `-a`/`-u`/`-b`/`-r` are mutually exclusive (one at
+  most) and conflict with the multipart flags `-f`/`-F`; `-f` and `-F` may be
+  repeated and combined with each other.
+
+Any violation prints a message and exits non-zero.
+
 === Output files
 
-Each invocation writes a group of files named `<domain>_<timestamp-ms>.*` in
-the current directory and prints the base name to stdout, allowing the result
-to be piped directly to `rename.sh`, `prettyprint.sh`, `cleanup.sh`, etc.
+Each invocation writes a group of files named `<domain>_<timestamp-ms>.*` (or
+`<base>.*` when `-s <base>` is given) in the current directory and prints the
+base name to stdout, allowing the result to be piped directly to `rename.sh`,
+`prettyprint.sh`, `cleanup.sh`, etc.
 
 [cols="1,3",options="header"]
 |===
@@ -920,11 +962,12 @@ rename.sh <new-name> [old-name]    # old-name read from stdin if omitted
 rename.sh -p <prefix> [old-name]   # new-name = <prefix><next number>
 ----
 
-In `-p` mode the new base is `<prefix>` followed by one more than the largest
-integer `N` among existing `<prefix>N.*` files in the current directory (`1` when
-none exist), so repeated runs keep appending without overwriting.  Only a
-purely-numeric suffix counts (`req12.*` → 12; `req_1.*` and unrelated files are
-ignored), and an empty prefix produces bare numbers (`1.*`, `2.*`, …).
+In `-p` mode the new base name is produced by `hal_basename.sh -p <prefix>`
+(see below): `<prefix>` followed by one more than the largest integer `N` among
+existing `<prefix>N.*` files in the current directory (`1` when none exist), so
+repeated runs keep appending without overwriting.  Only a purely-numeric suffix
+counts (`req12.*` → 12; `req_1.*` and unrelated files are ignored), and an empty
+prefix produces bare numbers (`1.*`, `2.*`, …).
 
 [cols="1,3",options="header"]
 |===
@@ -952,6 +995,39 @@ GET 'https://api.example.com/orders/1' | rename.sh order-1 | adoc.sh
 
 # Auto-numbered: req1, then req2, … on each run in the same directory
 GET 'https://api.example.com/orders' | rename.sh -p req
+----
+
+
+== `hal_basename.sh` — next auto-numbered base name for a prefix
+
+Prints the next `<prefix><N>` base name for a prefix, where `N` is one more than
+the largest integer among existing `<prefix>N.*` files in the current directory
+(`1` when none exist).  It is the single source of truth for that numbering:
+`rename.sh -p` and `nahal.sh` both call it, so the scheme can never drift apart.
+Typically the result is captured into a variable and handed to `hallink.sh -s`
+and a method's `-s`, so a request's files (and any sidecars) are written under
+the predictable name directly — no rename needed.
+
+[source,bash]
+----
+hal_basename.sh -p <prefix>
+----
+
+Only a purely-numeric suffix counts, and an empty prefix produces bare numbers
+(`1`, `2`, …).  Prints the new base name on stdout; bad arguments print a usage
+message and exit `1`.
+
+[source,bash]
+----
+# First call in an empty directory
+hal_basename.sh -p req            # → req1
+
+# With req1.* and req2.* present
+hal_basename.sh -p req            # → req3
+
+# Name a response group up front, no rename
+_s=$(hal_basename.sh -p req)
+GET -s "$_s" 'https://api.example.com/orders'
 ----
 
 
@@ -1602,7 +1678,9 @@ to info), `hal::log::init` dynamic re-read.
 
 |`httpreq.bats`
 |HTTP client — method derivation, URL from argument and stdin, request headers
-and cookies, all body flags, output file creation and content.
+and cookies, all body flags, output file creation and content, the `-s <base>`
+override, flexible (any-order) argument parsing, and single-occurrence /
+URL-source / body-method conflict validation.
 
 |`uritemplate.bats`
 |RFC 6570 — all operators, prefix and explode modifiers, string / list / map
@@ -1620,12 +1698,14 @@ extraction, interactive navigation.
 |`nahal.sh` — content-type classification, format detection / conversion, query
 helpers, HTTP-method-token validation, dropped `file://` path decoding,
 method-invocation resolution and custom-method links, CURIE docs, array-of-
-resources navigation, predictable step-file renaming, and `session.sh` replay
-generation (structural and end-to-end).
+resources navigation, predictable step-file naming via `hal_basename.sh`/`-s`,
+and `session.sh` replay generation (structural and end-to-end).
 
 |`hallink.bats`
 |`hallink.sh` — `--link` and file+path modes, URI template expansion, basename
-resolution, format preservation (JSON/YAML/XML), exit code specificity.
+resolution, format preservation (JSON/YAML/XML), exit code specificity, and the
+`-s <base>` sidecar files (`.source`/`.halpath`/`.bindings`, including position
+flexibility and the inline-link `.source` omission).
 
 |`haldoclink.bats`
 |`haldoclink.sh` — curie lookup at root and embedded levels, upward-stack
@@ -1640,8 +1720,13 @@ code specificity.
 |`adoc.bats`
 |`adoc.sh` — file grouping, AsciiDoc region wrapping, stdin mode.
 
+|`hal_basename.bats`
+|`hal_basename.sh` — `-p` numbering (first/next, numeric vs string compare,
+non-numeric and unrelated suffixes ignored, empty prefix), argument validation.
+
 |`rename.bats`
-|`rename.sh` — base name handling, extension preservation, stdin mode.
+|`rename.sh` — base name handling, extension preservation, stdin mode,
+`-p` auto-numbering (delegated to `hal_basename.sh`).
 
 |`cleanup.bats`
 |`cleanup.sh` — deletion with and without keep-extension list, stdin mode.

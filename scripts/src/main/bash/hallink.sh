@@ -2,12 +2,21 @@
 # hallink.sh — resolve a HAL link object's href, expanding URI templates
 #
 # Usage:
-#   hallink.sh --link [<json|xml|yaml>|@<file>] [-- var=value ...]
-#   hallink.sh --link                           [-- var=value ...]   (link from stdin)
-#   hallink.sh <file-or-basename> <hal-path>    [-- var=value ...]
+#   hallink.sh [-s <base>] --link [<json|xml|yaml>|@<file>] [-- var=value ...]
+#   hallink.sh [-s <base>] --link                           [-- var=value ...]   (link from stdin)
+#   hallink.sh [-s <base>] <file-or-basename> <hal-path>    [-- var=value ...]
 #
 # hal-path: links <rel> [N|name]
 #           embeddeds <rel> [N|field=value] links <rel2> [N2|name]
+#
+# -s <base> (may appear anywhere before '--') writes a sidecar record of how the
+# link was located, sharing the given base name so a later rename moves it with
+# the response files:
+#   <base>.source    the source the link came from (the <file> arg, or an @file
+#                    with '@' stripped; omitted for an inline/stdin --link)
+#   <base>.halpath   the hal-path segments, one per line (empty in --link mode)
+#   <base>.bindings  the var=value template bindings, one per line (empty if none)
+# Without -s nothing extra is written and stdout is unchanged.
 #
 # Template var bindings follow a literal '--' separator and must each contain
 # '='; everything before '--' is the path.  A 'field=value' segment in the path
@@ -33,11 +42,12 @@ _HALLINK_FMT="json"
 
 _hallink_usage() {
     local name; name="$(basename "$0")"
-    printf 'Usage: %s --link [<json>|@<file>] [-- var=val ...]\n' "$name" >&2
-    printf '       %s --link [-- var=val ...]            (link from stdin)\n' "$name" >&2
-    printf '       %s <file> <hal-path> [-- var=val ...]\n' "$name" >&2
+    printf 'Usage: %s [-s <base>] --link [<json>|@<file>] [-- var=val ...]\n' "$name" >&2
+    printf '       %s [-s <base>] --link [-- var=val ...]            (link from stdin)\n' "$name" >&2
+    printf '       %s [-s <base>] <file> <hal-path> [-- var=val ...]\n' "$name" >&2
     printf '\nhal-path: links <rel> [N|name]\n' >&2
     printf '          embeddeds <rel> [N|field=value] links <rel2> [N2|name]\n' >&2
+    printf '\n-s <base> writes <base>.source/.halpath/.bindings sidecar files.\n' >&2
 }
 
 # _hallink_resolve_file <spec>
@@ -166,8 +176,53 @@ _hallink_emit() {
 _mode=""
 _link_src=""
 _file=""
+_orig_file=""
 _path=()
 _bindings=()
+_base=""
+_have_base=0
+
+# Pull an optional -s <base> out of the argument list wherever it appears before
+# the '--' separator (leading, after --link <src>, or after <file>), so the rest
+# of the parsing below sees the unchanged path/binding grammar.
+_pre=()
+_seen_dd=0
+while [[ $# -gt 0 ]]; do
+    if [[ "$_seen_dd" -eq 0 && "$1" == "--" ]]; then
+        _seen_dd=1; _pre+=("$1"); shift; continue
+    fi
+    if [[ "$_seen_dd" -eq 0 && "$1" == "-s" ]]; then
+        shift
+        [[ "$_have_base" -eq 0 ]] || {
+            printf 'hallink: -s specified more than once\n' >&2; exit 1; }
+        [[ $# -gt 0 ]] || { printf 'hallink: -s requires a basename\n' >&2; exit 1; }
+        _base="$1"; _have_base=1; shift; continue
+    fi
+    _pre+=("$1"); shift
+done
+set -- ${_pre[@]+"${_pre[@]}"}
+
+[[ $# -eq 0 ]] && { _hallink_usage; exit 1; }
+
+# _hallink_write_meta — when -s was given, record how the link was located
+# (source / hal-path / bindings) under the shared base name, in the CWD.
+_hallink_write_meta() {
+    [[ "$_have_base" -eq 1 ]] || return 0
+    if [[ "$_mode" == file ]]; then
+        printf '%s\n' "$_orig_file" > "${_base}.source"
+    elif [[ "$_link_src" == @* ]]; then
+        printf '%s\n' "${_link_src#@}" > "${_base}.source"
+    fi
+    : > "${_base}.halpath"
+    if [[ ${#_path[@]} -gt 0 ]]; then
+        printf '%s\n' "${_path[@]}" > "${_base}.halpath"
+    fi
+    : > "${_base}.bindings"
+    if [[ ${#_bindings[@]} -gt 0 ]]; then
+        printf '%s\n' "${_bindings[@]}" > "${_base}.bindings"
+    fi
+    return 0
+}
 
 # Path segments and template var bindings are separated by a literal '--':
 # everything before it is the path (or, in --link mode, the link source),
@@ -236,6 +291,7 @@ if [[ "$_mode" == link ]]; then
 # ── Mode B: file + path ─────────────────────────────────────────────────────────
 
 else
+    _orig_file="$_file"
     _file=$(_hallink_resolve_file "$_file")
     _hallink_detect_file "$_file"
 
@@ -293,5 +349,7 @@ else
             | jq -c --arg h "$_href" '.href = $h')
     fi
 fi
+
+_hallink_write_meta
 
 _hallink_emit "$_link_obj"

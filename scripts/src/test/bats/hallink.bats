@@ -588,3 +588,82 @@ _make_plugin() {
     [ "$status" -eq 0 ]
     [[ "$output" == *'"/plugin-href"'* ]]
 }
+
+# ── -s metadata sidecar files ─────────────────────────────────────────────────
+
+@test "hallink.sh -s writes .source as the file argument as given" {
+    run bash "$HALLINK_SH" -s req1 res.json links self
+    [ "$status" -eq 0 ]
+    [ "$(cat req1.source)" = "res.json" ]
+}
+
+@test "hallink.sh -s writes .halpath one segment per line" {
+    run bash "$HALLINK_SH" -s req1 res.json embeddeds items 0 links self
+    [ "$status" -eq 0 ]
+    [ "$(cat req1.halpath)" = "$(printf 'embeddeds\nitems\n0\nlinks\nself')" ]
+}
+
+@test "hallink.sh -s writes .bindings one per line for a templated link" {
+    run bash "$HALLINK_SH" -s req1 res.json links multi -- q=hi lang=en
+    [ "$status" -eq 0 ]
+    [ "$(cat req1.bindings)" = "$(printf 'q=hi\nlang=en')" ]
+}
+
+@test "hallink.sh -s writes an empty .bindings file when there are no bindings" {
+    run bash "$HALLINK_SH" -s req1 res.json links self
+    [ "$status" -eq 0 ]
+    [ -f req1.bindings ]
+    [ ! -s req1.bindings ]
+}
+
+@test "hallink.sh -s may appear after the <file> argument" {
+    run bash "$HALLINK_SH" res.json -s req1 links self
+    [ "$status" -eq 0 ]
+    [ "$(cat req1.source)" = "res.json" ]
+    [ "$(cat req1.halpath)" = "self" ] || [ "$(cat req1.halpath)" = "$(printf 'links\nself')" ]
+}
+
+@test "hallink.sh -s with --link @file writes .source as the file (@ stripped)" {
+    printf '{"href":"/api{?q}","templated":true}' > link.json
+    run bash "$HALLINK_SH" -s req1 --link @link.json -- q=hi
+    [ "$status" -eq 0 ]
+    [ "$(cat req1.source)" = "link.json" ]
+    [ "$(cat req1.bindings)" = "q=hi" ]
+}
+
+@test "hallink.sh -s may appear after --link <src>" {
+    printf '{"href":"/api/x"}' > link.json
+    run bash "$HALLINK_SH" --link @link.json -s req1
+    [ "$status" -eq 0 ]
+    [ "$(cat req1.source)" = "link.json" ]
+}
+
+@test "hallink.sh -s with an inline --link writes NO .source" {
+    run bash "$HALLINK_SH" -s req1 --link '{"href":"/api{?q}","templated":true}' -- q=hi
+    [ "$status" -eq 0 ]
+    [ ! -f req1.source ]
+    [ -f req1.halpath ] && [ ! -s req1.halpath ]   # empty halpath in --link mode
+    [ "$(cat req1.bindings)" = "q=hi" ]
+}
+
+@test "hallink.sh without -s writes no sidecar files" {
+    run bash "$HALLINK_SH" res.json links self
+    [ "$status" -eq 0 ]
+    [ -z "$(ls *.source *.halpath *.bindings 2>/dev/null)" ]
+}
+
+@test "hallink.sh -s specified twice exits 1" {
+    run bash "$HALLINK_SH" -s a -s b res.json links self
+    [ "$status" -eq 1 ]
+}
+
+@test "hallink.sh -s without a basename exits 1" {
+    run bash "$HALLINK_SH" -s
+    [ "$status" -eq 1 ]
+}
+
+@test "hallink.sh -s does not write sidecars when resolution fails" {
+    run bash "$HALLINK_SH" -s req1 res.json links nonexistent
+    [ "$status" -eq 3 ]
+    [ ! -f req1.source ]
+}

@@ -9,14 +9,21 @@
 #   ln -s httpreq.sh DELETE
 #   ...
 #
-# Usage:
-#   GET  <url> [body-flags...]
-#   POST <url> [body-flags...]
-#   POST --    [body-flags...]              # URL read from first stdin line
-#   POST                                   # URL read from first stdin line (no body flags)
-#   GET  --link <json> [body-flags...]     # HAL link object: href→URL, type→Accept
-#   GET  --link @<file> [body-flags...]    # HAL link from file
-#   GET  --link [body-flags...]            # HAL link read from stdin
+# Usage (flags may appear in ANY order):
+#   GET  <url> [flags...]
+#   POST <url> [flags...]
+#   POST --    [flags...]                  # URL read from first stdin line
+#   POST                                   # URL read from first stdin line (no flags)
+#   GET  --link <json> [flags...]          # HAL link object: href→URL, type→Accept
+#   GET  --link @<file> [flags...]         # HAL link from file
+#   GET  --link [flags...]                 # HAL link read from stdin
+#   GET  <url> -s <basename> [flags...]    # write output files under <basename>
+#
+# Exactly one URL source may be given (a bare <url>, --, or --link); supplying
+# more than one is an error.  The flags -s and -i may each appear at most once.
+# The body-content flags -a/-u/-b/-r are mutually
+# exclusive (at most one across all of them) and conflict with the multipart
+# flags -f/-F; -f and -F may be repeated and combined with each other.
 #
 # Environment:
 #   HTTP_IN_HEADERS       newline-separated "Name: Value" header lines
@@ -34,9 +41,10 @@
 #   -b [filename]  binary body from file (--data-binary @file); omit for stdin
 #   -r [filename]  raw upload (--upload-file); omit filename for stdin
 #
-# Stdout: base name of the output files (domain_timestampms)
+# Stdout: base name of the output files (domain_timestampms, or the -s value)
 #
-# Output files written in the current directory:
+# Output files written in the current directory (named <base>.*, where <base>
+# is the -s argument when given, else domain_timestampms):
 #   <base>.curl    shell-quoted curl command (for replay)
 #   <base>.status  HTTP status code (single line)
 #   <base>.headers response headers, "Name: Value" per line
@@ -53,7 +61,8 @@ set -euo pipefail
 declare    _HAL_HTTP_METHOD=''
 declare    _HAL_HTTP_URL=''
 declare -a _HAL_HTTP_CURL_ARGS=()
-declare    _HAL_HTTP_BASE=''        # domain_timestampms
+declare    _HAL_HTTP_BASE=''        # domain_timestampms (or the -s override)
+declare    _HAL_HTTP_BASE_OVERRIDE='' # explicit base name from -s, if any
 declare    _HAL_HTTP_TMPDIR=''
 declare -a _HAL_HTTP_REPLAY_ARGS=() # curl args for .curl file (no capture flags)
 
@@ -179,90 +188,75 @@ _hal_http_build_base_args() {
     )
 }
 
-# _hal_http_parse_body_args [arg...]
-# Processes body-element flags from the positional arguments.
-# Each flag consumes the next positional arg as its parameter unless the next
-# arg is itself a flag (-a/-u/-f/-b/-r), in which case stdin is used.
-_hal_http_parse_body_args() {
-    local flag param fname
-    while [[ $# -gt 0 ]]; do
-        flag="$1"; shift
-        case "$flag" in
-            -i)
-                _HAL_HTTP_REPLAY_ARGS+=(-i)
-                ;;
-            -a|-u|-f|-F|-b|-r)
-                param=''
-                if [[ $# -gt 0 ]] && ! [[ "$1" =~ ^-[aufFbri]$ ]]; then
-                    param="$1"; shift
+# _hal_http_is_flag <arg>
+# True when <arg> is one of the recognized flag tokens.  Used to decide whether
+# the argument following a body flag is that flag's parameter or the next flag
+# (in which case the body flag falls back to reading its data from stdin).
+_hal_http_is_flag() {
+    case "$1" in
+        -i|-a|-u|-f|-F|-b|-r|-s|--|--link) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# _hal_http_add_body <flag> <param> <had_param>
+# Translates a single body flag (with its already-consumed parameter, if any)
+# into curl execution + replay args.  <had_param> is 1 when a parameter was
+# present on the command line, 0 when the flag should read from stdin instead.
+_hal_http_add_body() {
+    local flag="$1" param="$2" had="$3" fname
+    case "$flag" in
+        -a)
+            [[ "$had" -eq 1 ]] || param="$(cat)"
+            _HAL_HTTP_CURL_ARGS+=(--data "$param")
+            _HAL_HTTP_REPLAY_ARGS+=(--data "$param")
+            ;;
+        -u)
+            [[ "$had" -eq 1 ]] || param="$(cat)"
+            _HAL_HTTP_CURL_ARGS+=(--data-urlencode "$param")
+            _HAL_HTTP_REPLAY_ARGS+=(--data-urlencode "$param")
+            ;;
+        -f)
+            if [[ "$had" -eq 1 ]]; then
+                # name=path explicit, or fall back to basename
+                if [[ "$param" == *=* ]]; then
+                    fname="${param%%=*}"
+                    param="${param#*=}"
+                else
+                    fname="$(basename "$param")"
                 fi
-                case "$flag" in
-                    -a)
-                        if [[ -n "$param" ]]; then
-                            _HAL_HTTP_CURL_ARGS+=(--data "$param")
-                            _HAL_HTTP_REPLAY_ARGS+=(--data "$param")
-                        else
-                            param="$(cat)"
-                            _HAL_HTTP_CURL_ARGS+=(--data "$param")
-                            _HAL_HTTP_REPLAY_ARGS+=(--data "$param")
-                        fi
-                        ;;
-                    -u)
-                        if [[ -n "$param" ]]; then
-                            _HAL_HTTP_CURL_ARGS+=(--data-urlencode "$param")
-                            _HAL_HTTP_REPLAY_ARGS+=(--data-urlencode "$param")
-                        else
-                            param="$(cat)"
-                            _HAL_HTTP_CURL_ARGS+=(--data-urlencode "$param")
-                            _HAL_HTTP_REPLAY_ARGS+=(--data-urlencode "$param")
-                        fi
-                        ;;
-                    -f)
-                        if [[ -n "$param" ]]; then
-                            # name=path explicit, or fall back to basename
-                            if [[ "$param" == *=* ]]; then
-                                fname="${param%%=*}"
-                                param="${param#*=}"
-                            else
-                                fname="$(basename "$param")"
-                            fi
-                            _HAL_HTTP_CURL_ARGS+=(--form "${fname}=@${param}")
-                            _HAL_HTTP_REPLAY_ARGS+=(--form "${fname}=@${param}")
-                        else
-                            # No filename: upload stdin as raw body (not multipart)
-                            _HAL_HTTP_CURL_ARGS+=(--data-binary @-)
-                            _HAL_HTTP_REPLAY_ARGS+=(--data-binary @-)
-                        fi
-                        ;;
-                    -F)
-                        _HAL_HTTP_CURL_ARGS+=(--form "$param")
-                        _HAL_HTTP_REPLAY_ARGS+=(--form "$param")
-                        ;;
-                    -b)
-                        if [[ -n "$param" ]]; then
-                            _HAL_HTTP_CURL_ARGS+=(--data-binary "@${param}")
-                            _HAL_HTTP_REPLAY_ARGS+=(--data-binary "@${param}")
-                        else
-                            _HAL_HTTP_CURL_ARGS+=(--data-binary @-)
-                            _HAL_HTTP_REPLAY_ARGS+=(--data-binary @-)
-                        fi
-                        ;;
-                    -r)
-                        if [[ -n "$param" ]]; then
-                            _HAL_HTTP_CURL_ARGS+=(--upload-file "$param")
-                            _HAL_HTTP_REPLAY_ARGS+=(--upload-file "$param")
-                        else
-                            _HAL_HTTP_CURL_ARGS+=(--upload-file -)
-                            _HAL_HTTP_REPLAY_ARGS+=(--upload-file -)
-                        fi
-                        ;;
-                esac
-                ;;
-            *)
-                hal::log::warn "httpreq.sh: unknown body flag: $flag"
-                ;;
-        esac
-    done
+                _HAL_HTTP_CURL_ARGS+=(--form "${fname}=@${param}")
+                _HAL_HTTP_REPLAY_ARGS+=(--form "${fname}=@${param}")
+            else
+                # No filename: upload stdin as raw body (not multipart)
+                _HAL_HTTP_CURL_ARGS+=(--data-binary @-)
+                _HAL_HTTP_REPLAY_ARGS+=(--data-binary @-)
+            fi
+            ;;
+        -F)
+            [[ "$had" -eq 1 ]] || hal::log::die '-F requires a name=value argument'
+            _HAL_HTTP_CURL_ARGS+=(--form "$param")
+            _HAL_HTTP_REPLAY_ARGS+=(--form "$param")
+            ;;
+        -b)
+            if [[ "$had" -eq 1 ]]; then
+                _HAL_HTTP_CURL_ARGS+=(--data-binary "@${param}")
+                _HAL_HTTP_REPLAY_ARGS+=(--data-binary "@${param}")
+            else
+                _HAL_HTTP_CURL_ARGS+=(--data-binary @-)
+                _HAL_HTTP_REPLAY_ARGS+=(--data-binary @-)
+            fi
+            ;;
+        -r)
+            if [[ "$had" -eq 1 ]]; then
+                _HAL_HTTP_CURL_ARGS+=(--upload-file "$param")
+                _HAL_HTTP_REPLAY_ARGS+=(--upload-file "$param")
+            else
+                _HAL_HTTP_CURL_ARGS+=(--upload-file -)
+                _HAL_HTTP_REPLAY_ARGS+=(--upload-file -)
+            fi
+            ;;
+    esac
 }
 
 # _hal_http_write_url_file
@@ -406,7 +400,8 @@ _hal_http_usage() {
     printf '       %s --link <json> [flags...]  (HAL link: href→URL, type→Accept)\n' "$name" >&2
     printf '       %s --link @<file> [flags...]  (HAL link from file)\n'        "$name" >&2
     printf '       %s --link [flags...]          (HAL link from stdin)\n'       "$name" >&2
-    printf '\nFlags:\n'                                                                    >&2
+    printf '\nFlags (any order):\n'                                                        >&2
+    printf '  -s <basename>  write output files under <basename> (else domain_timestamp)\n' >&2
     printf '  -i             add -i to saved .curl replay (show response headers)\n' >&2
     printf '  -a [text]      --data (ASCII text; omit to read stdin)\n'        >&2
     printf '  -u [text]      --data-urlencode (omit to read stdin)\n'          >&2
@@ -414,53 +409,131 @@ _hal_http_usage() {
     printf '  -F name=value  --form name=value (multipart text field; repeatable)\n' >&2
     printf '  -b [filename]  --data-binary @file (omit for stdin)\n'           >&2
     printf '  -r [filename]  --upload-file (omit for stdin)\n'                 >&2
+    printf '\n-a/-u/-b/-r are mutually exclusive and conflict with -f/-F.\n'   >&2
 }
 
 # ── entry point ───────────────────────────────────────────────────────────────
 
 _hal_http_derive_method
 
-if [[ $# -eq 0 ]]; then
-    # No arguments: URL must come from stdin; error if stdin is a terminal
-    if [[ -t 0 ]]; then
-        _hal_http_usage
-        exit 1
-    fi
-    IFS= read -r _hal_http_url_tmp
-    _hal_http_parse_url "$_hal_http_url_tmp"
-    set --   # clear positional params so body loop is a no-op
-elif [[ "$1" == '--' ]]; then
-    # Explicit stdin sentinel: read URL from stdin, body flags follow '--'
-    shift
-    IFS= read -r _hal_http_url_tmp
-    _hal_http_parse_url "$_hal_http_url_tmp"
-    # $@ now holds the body flags
-elif [[ "$1" == '--link' ]]; then
-    shift
-    _hal_link_json=''
-    if [[ $# -gt 0 && "$1" != -* ]]; then
-        # Next arg is the link value (inline JSON or @file reference)
-        _hal_link_json="$1"; shift
-        [[ "$_hal_link_json" == @* ]] && _hal_link_json=$(<"${_hal_link_json#@}")
-    else
-        # No link value (or next arg is a body flag): read link JSON from stdin
+# Single left-to-right pass: every argument is read in turn and classified.
+# Flags may appear in any order.  At most one URL source (a bare URL, --, or
+# --link) and at most one each of -s and -i are allowed.  Body flags and their
+# consumed parameters are recorded in parallel arrays and replayed after the
+# URL is resolved, so any stdin read for the URL happens before a body's.
+_url_source=''            # '' | url | stdin | link
+_url_value=''             # the URL (url) or link spec (link)
+_link_from_stdin=0
+_seen_s=0
+_seen_i=0
+_seen_single=''           # the chosen -a/-u/-b/-r flag, if any
+_seen_multipart=0         # 1 once any -f/-F is seen
+declare -a _BF_FLAG=() _BF_PARAM=() _BF_HAD=()
+
+# _hal_http_set_url_source <kind> — record the URL source, rejecting a second one.
+_hal_http_set_url_source() {
+    [[ -z "$_url_source" ]] || hal::log::die \
+        'only one URL source allowed (a URL, --, or --link)'
+    _url_source="$1"
+}
+
+while [[ $# -gt 0 ]]; do
+    _arg="$1"; shift
+    case "$_arg" in
+        -s)
+            [[ "$_seen_s" -eq 0 ]] || hal::log::die '-s specified more than once'
+            _seen_s=1
+            [[ $# -gt 0 ]] || hal::log::die '-s requires a basename argument'
+            _HAL_HTTP_BASE_OVERRIDE="$1"; shift
+            ;;
+        -i)
+            [[ "$_seen_i" -eq 0 ]] || hal::log::die '-i specified more than once'
+            _seen_i=1
+            ;;
+        --)
+            _hal_http_set_url_source stdin
+            ;;
+        --link)
+            _hal_http_set_url_source link
+            if [[ $# -gt 0 ]] && ! _hal_http_is_flag "$1"; then
+                _url_value="$1"; shift
+            else
+                _link_from_stdin=1
+            fi
+            ;;
+        -a|-u|-b|-r)
+            [[ -z "$_seen_single" ]] || hal::log::die \
+                "conflicting body flag $_arg (already using $_seen_single)"
+            [[ "$_seen_multipart" -eq 0 ]] || hal::log::die \
+                "body flag $_arg conflicts with multipart -f/-F"
+            _seen_single="$_arg"
+            _BF_FLAG+=("$_arg")
+            if [[ $# -gt 0 ]] && ! _hal_http_is_flag "$1"; then
+                _BF_PARAM+=("$1"); _BF_HAD+=(1); shift
+            else
+                _BF_PARAM+=(''); _BF_HAD+=(0)
+            fi
+            ;;
+        -f|-F)
+            [[ -z "$_seen_single" ]] || hal::log::die \
+                "multipart $_arg conflicts with body flag $_seen_single"
+            _seen_multipart=1
+            _BF_FLAG+=("$_arg")
+            if [[ $# -gt 0 ]] && ! _hal_http_is_flag "$1"; then
+                _BF_PARAM+=("$1"); _BF_HAD+=(1); shift
+            else
+                _BF_PARAM+=(''); _BF_HAD+=(0)
+            fi
+            ;;
+        -*)
+            hal::log::die "unknown flag: $_arg"
+            ;;
+        *)
+            _hal_http_set_url_source url
+            _url_value="$_arg"
+            ;;
+    esac
+done
+
+# Resolve the URL source (reading stdin where needed) before any body stdin read.
+case "$_url_source" in
+    url)
+        _hal_http_parse_url "$_url_value"
+        ;;
+    link)
+        if [[ "$_link_from_stdin" -eq 1 ]]; then
+            if [[ -t 0 ]]; then
+                printf '%s: --link: no link argument and stdin is a terminal\n' \
+                    "$(basename "$0")" >&2
+                exit 1
+            fi
+            _hal_link_json=$(cat)
+        else
+            _hal_link_json="$_url_value"
+            [[ "$_hal_link_json" == @* ]] && _hal_link_json=$(<"${_hal_link_json#@}")
+        fi
+        _hal_http_expand_link "$_hal_link_json"
+        ;;
+    stdin|'')
+        # Explicit -- or no URL source at all: read the URL from the first
+        # stdin line; a terminal stdin with nothing to read is a usage error.
         if [[ -t 0 ]]; then
-            printf '%s: --link: no link argument and stdin is a terminal\n' \
-                "$(basename "$0")" >&2
+            _hal_http_usage
             exit 1
         fi
-        _hal_link_json=$(cat)
-    fi
-    _hal_http_expand_link "$_hal_link_json"
-    # $@ now holds body flags
-else
-    # Normal: first arg is URL, rest are body flags
-    _hal_http_parse_url "$1"
-    shift
-fi
+        IFS= read -r _hal_http_url_tmp
+        _hal_http_parse_url "$_hal_http_url_tmp"
+        ;;
+esac
+
+# Apply an explicit -s base name over the URL-derived default.
+[[ -n "$_HAL_HTTP_BASE_OVERRIDE" ]] && _HAL_HTTP_BASE="$_HAL_HTTP_BASE_OVERRIDE"
 
 _hal_http_add_headers
 _hal_http_add_cookies
 _hal_http_build_base_args
-_hal_http_parse_body_args "$@"
+[[ "$_seen_i" -eq 1 ]] && _HAL_HTTP_REPLAY_ARGS+=(-i)
+for (( _k = 0; _k < ${#_BF_FLAG[@]}; _k++ )); do
+    _hal_http_add_body "${_BF_FLAG[$_k]}" "${_BF_PARAM[$_k]}" "${_BF_HAD[$_k]}"
+done
 _hal_http_run
