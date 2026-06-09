@@ -1325,6 +1325,146 @@ GET 'https://api.example.com/orders/1') \
 The last redirect will drop the printed name into the 'sink'.
 
 
+== `grapher.sh` — navigation graph builder
+
+Build a directed graph showing which API resource's links led to which requests
+in a HAL session.  Scans a session directory for grouped response files
+(typically named `req1.body`, `req2.body`, …), extracts URLs and link
+relationships, and emits a graph in multiple visual and data formats.
+
+The edge origin is *recorded* when a request carries the sidecars written by
+`hallink.sh -s` (`.source`, `.halpath`, `.bindings`), which unambiguously name
+the resource and path where the link was resolved.  When sidecars are absent,
+the origin is *guessed* by matching the target URL against earlier bodies' hrefs
+— if more than one href matches, the edge is flagged as ambiguous.
+
+=== Usage
+
+[source,bash]
+----
+grapher.sh [--format <fmt>] [--orientation <orient>] [DIR]
+----
+
+[cols="1,3",options="header"]
+|===
+|Option |Description
+
+|`--format <fmt>` (default: `dot`)
+|Output format: `dot` (Graphviz), `mermaid`, `plantuml`, `ascii`, or `json`.
+
+|`--orientation <orient>` (default: `lr`)
+|Graph direction: `lr` (left-to-right) or `tb` (top-to-bottom).
+
+|`DIR` (default: `.`)
+|Session directory containing grouped response files.
+|===
+
+=== Output formats
+
+[cols="1,3",options="header"]
+|===
+|Format |Use Case
+
+|`dot`
+|Graphviz input; render with `dot -Tpng -o out.png`.  Supports `--orientation`.
+
+|`mermaid`
+|GitHub-flavored markdown (```mermaid` fence), or Mermaid Live Editor.  Supports
+`--orientation` (LR vs TD).
+
+|`plantuml`
+|PlantUML server or `plantuml` CLI.  Supports `--orientation` (left-to-right or
+default top-to-bottom).
+
+|`ascii`
+|Human-readable text output for the terminal or plain-text reports.  Shows nodes,
+incoming/outgoing edges, and labels indented per line.
+
+|`json`
+|Structured data: `{"nodes":[...], "edges":[...]}` with `"guessed":bool` per
+edge.  Sortable and queryable by script.
+|===
+
+=== Edge origin: recorded vs. guessed
+
+When a request was created by `nahal.sh` or with `hallink.sh -s`, it carries
+three sidecar files:
+
+[cols="1,3",options="header"]
+|===
+|File |Contains
+
+|`<base>.source`
+|The resource file the link was resolved from (e.g., `req1.body`), or a file
+path for `@file` links; omitted for inline/stdin `--link` calls.
+
+|`<base>.halpath`
+|The hal-path segments traversed (one per line), e.g. `links`, `orders`, `0`.
+Grouped into labels like `links orders 0`.
+
+|`<base>.bindings`
+|Template var=value expansions (one per line), e.g. `id=42`.
+|===
+
+When `.source` exists and is non-empty, the edge origin is **recorded**: the
+source resource, path, and bindings are trusted as-is and used to build the
+edge label directly.  No re-extraction or validation.
+
+When `.source` is missing or empty, the origin is **guessed**: grapher extracts
+all `href` values from earlier response bodies, matches them against the target
+URL, and builds an edge from the first matching body.  If more than one href in
+that body matches, the edge is flagged **ambiguous** with a note like
+`(guessed: 3 matches)` appended to the label.
+
+In JSON output, every edge carries a `"guessed"` boolean: `false` for recorded,
+`true` for ambiguous guesses (single matches in guessed mode are `false`).
+
+=== Example: nahal.sh session graph
+
+After an interactive nahal.sh session, the session directory contains:
+
+[source]
+----
+req1.body   req1.status   req1.headers   req1.curl
+req2.body   req2.status   req2.headers   req2.curl   req2.source   req2.halpath   req2.bindings
+req3.body   req3.status   req3.headers   req3.curl   req3.source   req3.halpath   req3.bindings
+session.sh
+----
+
+Generate a graph:
+
+[source,bash]
+----
+grapher.sh --format mermaid nahal_12345/ > session.mmd
+grapher.sh --format json nahal_12345/ | jq '.edges[] | select(.guessed == true)' # ambiguous only
+----
+
+The JSON output for req2 and req3 will have `"guessed":false` (recorded via
+sidecars), while req1 (guessed by URL match) may have `"guessed":true` if
+ambiguous.
+
+=== Recorded edge example
+
+[source,bash]
+----
+# A request created by hallink.sh -s records the exact link it resolved
+_s=$(hal_basename.sh -p req)
+hallink.sh -s "$_s" orders.body embeddeds items 0 links item | GET -s "$_s" --link
+
+# This creates req2.{body,status,headers,curl,source,halpath,bindings}
+# where req2.source contains "orders.body", req2.halpath contains the segments,
+# and req2.bindings contains any template expansions.
+
+# The graph will show: orders → items[0] via link 'item' (recorded, no ambiguity)
+----
+
+=== Requires
+
+- `jq` (JSON parsing)
+- `yq` (optional, for YAML/XML responses)
+- `hal.sh` (for self-link extraction when `.source` is unavailable)
+
+
 == `hal_utils.sh` — utility function library
 
 Source this file to load all `hal::*` helper namespaces.  It is loaded
@@ -1719,6 +1859,12 @@ code specificity.
 
 |`adoc.bats`
 |`adoc.sh` — file grouping, AsciiDoc region wrapping, stdin mode.
+
+|`grapher.bats`
+|`grapher.sh` — session directory scanning, URL/link extraction, graph
+construction, recorded (sidecar-based) vs. guessed (matched-href) edge origin,
+ambiguity flagging, output formats (dot, mermaid, plantuml, ascii, json),
+orientation control.
 
 |`hal_basename.bats`
 |`hal_basename.sh` — `-p` numbering (first/next, numeric vs string compare,
