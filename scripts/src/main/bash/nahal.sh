@@ -66,6 +66,7 @@ _BROW_OUTDIR=''          # directory for HTTP response files
 _BROW_LOG=''             # path to session log script
 _BROW_STEP=0             # request counter
 _BROW_LAST_BASE=''       # base name of last response file set
+declare -a _BROW_STEP_BASE=()  # step number → its response base name (for back-nav)
 _BROW_LAST_BINDINGS=()   # uritemplate var=value bindings from the last expansion
 _BROW_LAST_URL=''        # expanded URL from the last _brow_expand_vars call
 _BROW_REQ_HALLINK=()     # hallink.sh args for the next link request (live)
@@ -394,6 +395,7 @@ _brow_do_request() {
     status=$(cat "${_BROW_OUTDIR}/${base}.status" 2>/dev/null || printf '???')
     hal::log::info "  HTTP ${status} — ${base}.{status,headers,body}"
     _BROW_LAST_BASE="$base"
+    _BROW_STEP_BASE[$_BROW_STEP]="$base"
 }
 
 # _brow_do_link_request <method> <display>
@@ -436,6 +438,7 @@ _brow_do_link_request() {
     status=$(cat "${_BROW_OUTDIR}/${base}.status" 2>/dev/null || printf '???')
     hal::log::info "  HTTP ${status} — ${base}.{status,headers,body}"
     _BROW_LAST_BASE="$base"
+    _BROW_STEP_BASE[$_BROW_STEP]="$base"
 }
 
 # _brow_get_ct <headers-file>  → Content-Type value
@@ -795,9 +798,15 @@ _brow_follow_link() {
     local href templated accept url
     accept=$(_brow_accept_for_link "$link_json")
 
+    # The resource the link is being followed *from* is the one currently being
+    # viewed — identified by its step number (src_base), not the global
+    # _BROW_LAST_BASE (which tracks the most recent fetch and is stale after the
+    # user navigates back).  Resolve it to that resource's response base name.
+    local _src_base_name="${_BROW_STEP_BASE[$src_base]:-$_BROW_LAST_BASE}"
+
     if [[ -n "${HAL_LINK_PLUGIN:-}" ]]; then
         local _resource_file=''
-        [[ -n "${_BROW_LAST_BASE:-}" ]] && _resource_file="${_BROW_OUTDIR}/${_BROW_LAST_BASE}.body"
+        [[ -n "$_src_base_name" ]] && _resource_file="${_BROW_OUTDIR}/${_src_base_name}.body"
         link_json=$(_hal_run_plugins "$link_json" \
             ${_resource_file:+"$_resource_file"} \
             "${_BROW_NAV_PATH[@]+"${_BROW_NAV_PATH[@]}"}" \
@@ -832,8 +841,9 @@ _brow_follow_link() {
 
     # Make the request, mirroring the replay exactly: hallink.sh -s resolves the
     # link from the source body at this path (writing the .source/.halpath/
-    # .bindings sidecars) and the method sends it via --link.
-    _BROW_REQ_HALLINK=("${_BROW_LAST_BASE}.body" "${halpath[@]}")
+    # .bindings sidecars) and the method sends it via --link.  The source body is
+    # the resource being viewed (src_base), not the last-fetched one.
+    _BROW_REQ_HALLINK=("${_src_base_name}.body" "${halpath[@]}")
     [[ ${#_BROW_LAST_BINDINGS[@]} -gt 0 ]] && \
         _BROW_REQ_HALLINK+=(-- "${_BROW_LAST_BINDINGS[@]}")
     _BROW_REQ_BODY=(${body_args[@]+"${body_args[@]}"})
@@ -1008,7 +1018,7 @@ _brow_navigate_resource() {
             links)           _brow_nav_links      "$json" "$url" "$src_base" ;;
             embedded)        _brow_nav_embedded   "$json" "$src_base" ;;
             properties)      _brow_nav_properties "$json" ;;
-            docs)            _brow_nav_docs       "$json" ;;
+            docs)            _brow_nav_docs       "$json" "$src_base" ;;
             "print resource") _brow_pretty "$json" ;;
             back)            return 0 ;;
             quit)            exit 0 ;;
@@ -1466,13 +1476,16 @@ _brow_open_docs() {
     fi
 }
 
-# _brow_nav_docs <json>
+# _brow_nav_docs <json> <src_base>
 # Menu of CURIE-prefixed rels; resolves the chosen rel's curie template to a
 # documentation URL and opens it in the browser.
 _brow_nav_docs() {
-    local json="$1"
+    local json="$1" src_base="${2:-}"
     local links
     links=$(_brow_qk "$json" "_links")
+
+    # The resource these docs belong to (by step number), not the last fetch.
+    local _src_base_name="${_BROW_STEP_BASE[$src_base]:-$_BROW_LAST_BASE}"
 
     local -a rels=()
     local r
@@ -1490,8 +1503,8 @@ _brow_nav_docs() {
             # exactly as link following does, so plugins can rewrite the doc href.
             if [[ -n "${HAL_LINK_PLUGIN:-}" ]]; then
                 local _resource_file=''
-                [[ -n "${_BROW_LAST_BASE:-}" ]] && \
-                    _resource_file="${_BROW_OUTDIR}/${_BROW_LAST_BASE}.body"
+                [[ -n "$_src_base_name" ]] && \
+                    _resource_file="${_BROW_OUTDIR}/${_src_base_name}.body"
                 doc_link=$(_hal_run_plugins "$doc_link" \
                     ${_resource_file:+"$_resource_file"} \
                     "${_BROW_NAV_PATH[@]+"${_BROW_NAV_PATH[@]}"}" \

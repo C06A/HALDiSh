@@ -594,6 +594,62 @@ CURI_RES='{"_links":{"self":{"href":"/r"},"curies":[{"name":"ex","href":"https:/
     [[ "$stderr" == *"/api/a"* ]]
 }
 
+@test "interactive: a link followed after 'back' is resolved from the resource navigated back to" {
+    # Regression: after navigating root → B and pressing 'back' to root, following
+    # a *root* link (toX) must extract it from root's body — not the deepest
+    # fetched body (B), which the global last-base used to point at.  A URL-routing
+    # mock returns a different body per requested path so the source body matters.
+    cat > "${STUB_DIR}/GET" <<'ROUTER'
+#!/usr/bin/env bash
+base="resp"; _prev=""; url=""; is_link=0
+for _a in "$@"; do
+    [[ "$_prev" == "-s" ]] && base="$_a"
+    [[ "$_a" == "--link" ]] && is_link=1
+    [[ "$_a" != -* && "$_prev" != "-s" && -z "$url" ]] && url="$_a"
+    _prev="$_a"
+done
+# In --link mode the link object arrives on stdin; its href is the request URL.
+if (( is_link )); then
+    _link=$(cat)
+    url=$(printf '%s' "$_link" | jq -r '.href // empty' 2>/dev/null)
+fi
+case "$url" in
+    */B)  body='{"_links":{"self":{"href":"/B"}}}' ;;                       # B: no toX
+    */X)  body='{"_links":{"self":{"href":"/X"}}}' ;;                       # the goal
+    *)    body='{"_links":{"self":{"href":"/A"},"toB":{"href":"/B"},"toX":{"href":"/X"}}}' ;;
+esac
+printf 'HTTP/1.1 200 OK\r\nContent-Type: application/hal+json\r\n\r\n' > "${base}.headers"
+printf '200' > "${base}.status"
+printf '%s' "$body" > "${base}.body"
+printf 'curl -X GET\n' > "${base}.curl"
+printf '%s\n' "$base"
+ROUTER
+    chmod +x "${STUB_DIR}/GET"
+
+    # rels sort identically under jq (alphabetical) and yq (document order):
+    # self, toB, toX.
+    _type_key '1'   # links               (root: links(1) print(2) quit(3))
+    _type_key '3'   # toB                 (links: back(1) self(2) toB(3) toX(4))
+    _type_key '1'   # follow              (action: follow(1) details(2) back(3))
+    _type_key '1'   # GET                 (method: GET(1) …)
+    _type_key '3'   # back                (B resource: links(1) print(2) back(3) quit(4))
+    _type_key '4'   # toX                 (root links again: back(1) self(2) toB(3) toX(4))
+    _type_key '1'   # follow
+    _type_key '1'   # GET
+    _type_key '4'   # quit                (followed resource: links(1) print(2) back(3) quit(4))
+    run --separate-stderr bash -c 'cd "$2" && bash "$1" -p req http://example.com/A' \
+        _ "$NAHAL_SH" "$WORK_DIR"
+    [ "$status" -eq 0 ]
+
+    local dir; dir=$(ls -d "${WORK_DIR}"/nahal_* | head -1)
+    # Three successful fetches: A (req1), B (req2), X (req3).
+    [ -f "${dir}/req3.body" ]
+    # The third fetch reached /X — proving the toX follow read root's body, not B's.
+    grep -qF '/X' "${dir}/req3.body"
+    # The toX request's recorded source sidecar is root's body (req1), not B's (req2).
+    grep -qF 'req1.body' "${dir}/req3.source"
+}
+
 @test "interactive: follow an element of an array-valued link rel, logging the index" {
     # _links.items is an array of two links; only that one rel so menu positions
     # are the same under jq (sorted keys) and yq (document order).

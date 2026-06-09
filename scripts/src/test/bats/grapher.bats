@@ -329,6 +329,38 @@ teardown() {
     [[ "$output" != *'left to right direction'* ]]
 }
 
+@test "grapher --format plantuml escapes double quotes in a curl node label" {
+    # A real curl command mixes single and double quotes; an unescaped " inside
+    # the node "..." label closes the string early and makes PlantUML fail with
+    # "Syntax error? (Assumed diagram type: class)".
+    _group g1 --curl 'curl -X GET '"'"'http://h/'"'"' -H "Accept: application/hal+json"'
+    run bash "$GRAPHER_SH" --format plantuml "$WORK_DIR"
+    [ "$status" -eq 0 ]
+    # The node line must be a single well-formed quoted label: exactly the two
+    # delimiting quotes, none in between.
+    local node_line
+    node_line=$(printf '%s\n' "$output" | grep '^node ')
+    [[ "$node_line" == *'Accept:'* ]]          # the header text survived
+    [[ "$node_line" != *'"Accept:'* ]]         # but not as an interior double quote
+    [ "$(printf '%s' "$node_line" | tr -cd '"' | wc -c | tr -d ' ')" -eq 2 ]
+}
+
+@test "grapher --format plantuml gives numeric (empty-prefix) basenames valid aliases" {
+    # Bare-number basenames (empty -p prefix) are invalid PlantUML aliases; they
+    # must be emitted with a leading non-digit and used consistently on edges.
+    _group 1 \
+        --url 'https://api.example.com/' \
+        --body '{"_links":{"self":{"href":"/"},"x":{"href":"/x"}}}'
+    _group 2 --url 'https://api.example.com/x'
+    run bash "$GRAPHER_SH" --format plantuml "$WORK_DIR"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'as n_1'* ]]
+    [[ "$output" == *'as n_2'* ]]
+    [[ "$output" == *'n_1 --> n_2'* ]]
+    # No edge or node line starts with a bare digit alias.
+    [[ "$output" != *$'\n''1 -->'* ]]
+}
+
 @test "grapher --format ascii shows nodes and arrows" {
     _group g1 \
         --url 'https://api.example.com/items' \

@@ -778,9 +778,12 @@ _esc_mermaid() {
     printf '%s' "$s"
 }
 
-# Escape for PlantUML label: newlines → \n literal
+# Escape for a PlantUML double-quoted label.  PlantUML has no in-string escape
+# for a literal double quote, so collapse any " to ' (keeps a curl command, which
+# mixes both quote styles, readable); newlines → \n literal for an in-label break.
 _esc_plantuml() {
     local s="$1"
+    s="${s//\"/\'}"
     s="${s//$'\n'/\\n}"
     printf '%s' "$s"
 }
@@ -788,6 +791,16 @@ _esc_plantuml() {
 # Emit a valid Mermaid node ID (letters, digits, underscore, hyphen)
 _mermaid_id() {
     printf '%s' "$1" | tr -c 'a-zA-Z0-9_-' '_'
+}
+
+# Emit a valid PlantUML alias: letters, digits, underscore only, and never
+# starting with a digit (a bare-number basename from an empty prefix would
+# otherwise be an invalid alias).  Used consistently for node decls and edges.
+_plantuml_id() {
+    local id
+    id=$(printf '%s' "$1" | tr -c 'a-zA-Z0-9_' '_')
+    [[ "$id" =~ ^[A-Za-z_] ]] || id="n_${id}"
+    printf '%s' "$id"
 }
 
 # ── output formats ────────────────────────────────────────────────────────────
@@ -841,15 +854,24 @@ _output_plantuml() {
 
     local b
     for b in "${_GR_NODE_IDS[@]}"; do
-        printf 'node "%s" as %s\n' "$(_esc_plantuml "${_GR_NODE_CURL[$b]:-}")" "$b"
+        printf 'node "%s" as %s\n' \
+            "$(_esc_plantuml "${_GR_NODE_CURL[$b]:-}")" "$(_plantuml_id "$b")"
     done
 
     local i
     for (( i = 0; i < ${#_GR_EDGE_FROM[@]}; i++ )); do
-        printf '%s --> %s : %s\n' \
-            "${_GR_EDGE_FROM[$i]}" \
-            "${_GR_EDGE_TO[$i]}" \
-            "$(_esc_plantuml "${_GR_EDGE_LABEL[$i]}")"
+        local label
+        label=$(_esc_plantuml "${_GR_EDGE_LABEL[$i]}")
+        if [[ -n "$label" ]]; then
+            printf '%s --> %s : %s\n' \
+                "$(_plantuml_id "${_GR_EDGE_FROM[$i]}")" \
+                "$(_plantuml_id "${_GR_EDGE_TO[$i]}")" \
+                "$label"
+        else
+            printf '%s --> %s\n' \
+                "$(_plantuml_id "${_GR_EDGE_FROM[$i]}")" \
+                "$(_plantuml_id "${_GR_EDGE_TO[$i]}")"
+        fi
     done
     printf '@enduml\n'
 }
