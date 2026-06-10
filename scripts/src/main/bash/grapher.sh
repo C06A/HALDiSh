@@ -780,10 +780,14 @@ _esc_mermaid() {
 
 # Escape for a PlantUML double-quoted label.  PlantUML has no in-string escape
 # for a literal double quote, so collapse any " to ' (keeps a curl command, which
-# mixes both quote styles, readable); newlines → \n literal for an in-label break.
+# mixes both quote styles, readable).  Every line break becomes the literal \n
+# PlantUML renders as an in-label break: first a curl continuation (backslash +
+# newline) so its trailing backslash is absorbed, then any remaining bare newline
+# (multi-line edge labels) — leaving a real newline would split the statement.
 _esc_plantuml() {
     local s="$1"
     s="${s//\"/\'}"
+    s="${s//$'\\\n'/\\n}"
     s="${s//$'\n'/\\n}"
     printf '%s' "$s"
 }
@@ -876,63 +880,309 @@ _output_plantuml() {
     printf '@enduml\n'
 }
 
-_output_ascii() {
-    # Build incoming-edge index: target → "from|label"
-    declare -A _incoming=()
+# Repeat a (possibly multi-byte) string N times.
+_ascii_repeat() {
+    local c="$1" n="$2" out=''
+    while (( n-- > 0 )); do out+="$c"; done
+    printf '%s' "$out"
+}
+
+# Fit a string into W columns: truncate with a trailing … if it is too long.
+# (Node text is ASCII URLs/ids, so character count equals column count.)
+_ascii_fit() {
+    local s="$1" w="$2"
+    if   (( w <= 0 ));      then return 0
+    elif (( ${#s} > w ));   then printf '%s…' "${s:0:w-1}"
+    else                         printf '%s' "$s"; fi
+}
+
+# Draw a two-line rectangle for one node (id on top, "METHOD url" below) and
+# echo its lines with no prefix; the caller indents them.
+_ascii_box() {
+    local id="$1" sub="$2" maxw=72
+    local w=${#id}
+    (( ${#sub} > w )) && w=${#sub}
+    (( w > maxw )) && w=$maxw
+    id=$(_ascii_fit "$id" "$w")
+    sub=$(_ascii_fit "$sub" "$w")
+    local bar; bar=$(_ascii_repeat '─' $(( w + 2 )))
+    printf '┌%s┐\n'   "$bar"
+    printf '│ %-*s │\n' "$w" "$id"
+    printf '│ %-*s │\n' "$w" "$sub"
+    printf '└%s┘\n'   "$bar"
+}
+
+# The box's second line: the request method (parsed from the .curl) and URL.
+_ascii_node_sub() {
+    local node="$1" method='GET' url="${_GR_NODE_URL[$node]:-}"
+    local curl="${_GR_NODE_CURL[$node]:-}"
+    [[ "$curl" =~ -X[[:space:]]+([A-Za-z]+) ]] && method="${BASH_REMATCH[1]}"
+    [[ -z "$url" ]] && url='(no url)'
+    printf '%s %s' "$method" "$url"
+}
+
+# Collect a node's outgoing edges (in edge order) into _CKIDS/_CLABS.  Labels can
+# contain embedded newlines, so edges are read straight from the parallel arrays
+# rather than packed into a single delimited string.
+_ascii_children() {
+    local node="$1" i
+    _CKIDS=(); _CLABS=()
+    for (( i = 0; i < ${#_GR_EDGE_FROM[@]}; i++ )); do
+        if [[ "${_GR_EDGE_FROM[$i]}" == "$node" ]]; then
+            _CKIDS+=("${_GR_EDGE_TO[$i]}")
+            _CLABS+=("${_GR_EDGE_LABEL[$i]}")
+        fi
+    done
+}
+
+# ── ascii: top-to-bottom (boxed indented tree) ────────────────────────────────
+
+# Render a node's box at the given prefix, then each child below it, hung off a
+# ├─/└─ branch carrying the edge label.  A node already drawn elsewhere is shown
+# as a one-line back-reference so shared targets / cycles don't recurse forever.
+_ascii_render() {
+    local node="$1" prefix="$2"
+
+    if [[ -n "${_ascii_seen[$node]:-}" ]]; then
+        printf '%s· %s (shown above)\n' "$prefix" "$node"
+        return 0
+    fi
+    _ascii_seen[$node]=1
+
+    local line
+    while IFS= read -r line; do
+        printf '%s%s\n' "$prefix" "$line"
+    done < <(_ascii_box "$node" "$(_ascii_node_sub "$node")")
+
+    _ascii_children "$node"
+    local kids=() labs=()
+    (( ${#_CKIDS[@]} )) && kids=("${_CKIDS[@]}")
+    (( ${#_CLABS[@]} )) && labs=("${_CLABS[@]}")
+
+    local n=${#kids[@]} i
+    # A short drop links the box's bottom edge to its branches.
+    (( n > 0 )) && printf '%s│\n' "$prefix"
+    for (( i = 0; i < n; i++ )); do
+        local branch contpref
+        if (( i == n - 1 )); then branch='└─ '; contpref="${prefix}   "
+        else                      branch='├─ '; contpref="${prefix}│  "; fi
+
+        # First label line rides the branch; continuation lines align under it.
+        local label="${labs[$i]}"
+        local first="${label%%$'\n'*}" rest="${label#*$'\n'}"
+        printf '%s%s%s\n' "$prefix" "$branch" "$first"
+        if [[ "$rest" != "$label" ]]; then
+            local ll
+            while IFS= read -r ll; do
+                [[ -n "$ll" ]] && printf '%s%s\n' "$contpref" "$ll"
+            done <<< "$rest"
+        fi
+
+        _ascii_render "${kids[$i]}" "$contpref"
+    done
+    return 0
+}
+
+_ascii_tb() {
+    declare -A _ascii_seen=()
+
+    # A root is any node with no incoming edge; render those first, in node order.
+    declare -A _indeg=()
     local i
-    for (( i = 0; i < ${#_GR_EDGE_FROM[@]}; i++ )); do
-        local to="${_GR_EDGE_TO[$i]}"
-        _incoming["$to"]+="${_GR_EDGE_FROM[$i]}|${_GR_EDGE_LABEL[$i]}"$'\n'
-    done
+    for (( i = 0; i < ${#_GR_EDGE_TO[@]}; i++ )); do _indeg["${_GR_EDGE_TO[$i]}"]=1; done
 
-    # Build outgoing-edge index: from → "label|to"
-    declare -A _outgoing=()
-    for (( i = 0; i < ${#_GR_EDGE_FROM[@]}; i++ )); do
-        local from="${_GR_EDGE_FROM[$i]}"
-        _outgoing["$from"]+="${_GR_EDGE_LABEL[$i]}|${_GR_EDGE_TO[$i]}"$'\n'
-    done
-
-    local b
+    local b first=1
     for b in "${_GR_NODE_IDS[@]}"; do
-        printf '[%s]\n' "$b"
-        printf '%s\n' "${_GR_NODE_CURL[$b]:-curl (unknown)}"
-
-        # Incoming
-        local entry
-        while IFS=$'\n' read -r entry; do
-            [[ -z "$entry" ]] && continue
-            local from="${entry%%|*}"
-            local label="${entry#*|}"
-            # Multi-line label: indent continuation lines
-            local first_line="${label%%$'\n'*}"
-            local rest="${label#*$'\n'}"
-            printf '  <-- %s via %s\n' "$from" "$first_line"
-            if [[ "$rest" != "$label" ]]; then
-                local ll
-                while IFS= read -r ll; do
-                    [[ -n "$ll" ]] && printf '       %s\n' "$ll"
-                done <<< "$rest"
-            fi
-        done <<< "${_incoming[$b]:-}"
-
-        # Outgoing
-        while IFS=$'\n' read -r entry; do
-            [[ -z "$entry" ]] && continue
-            local label="${entry%%|*}"
-            local to="${entry#*|}"
-            local first_line="${label%%$'\n'*}"
-            local rest="${label#*$'\n'}"
-            printf '  --> %s via %s\n' "$to" "$first_line"
-            if [[ "$rest" != "$label" ]]; then
-                local ll
-                while IFS= read -r ll; do
-                    [[ -n "$ll" ]] && printf '       %s\n' "$ll"
-                done <<< "$rest"
-            fi
-        done <<< "${_outgoing[$b]:-}"
-
-        printf '\n'
+        [[ -n "${_indeg[$b]:-}" ]] && continue
+        (( first )) || printf '\n'; first=0
+        _ascii_render "$b" ''
     done
+
+    # Anything not reached above (e.g. only inside a cycle) still gets drawn.
+    for b in "${_GR_NODE_IDS[@]}"; do
+        [[ -n "${_ascii_seen[$b]:-}" ]] && continue
+        (( first )) || printf '\n'; first=0
+        _ascii_render "$b" ''
+    done
+    return 0
+}
+
+# ── ascii: left-to-right (boxes on a character canvas) ─────────────────────────
+#
+# The canvas _CV is a sparse grid of single ASCII glyphs keyed "row,col"; pure
+# ASCII keeps one glyph == one column == one byte, so painting works regardless
+# of locale.  Columns hold successive link depths; a tidy-tree pass stacks each
+# node's children vertically and the parent is centred against them.
+
+_cv_set() {
+    _CV["$1,$2"]="$3"
+    (( $1 > _CV_MAXY )) && _CV_MAXY=$1
+    (( $2 > _CV_MAXX )) && _CV_MAXX=$2
+    return 0
+}
+_cv_text() {
+    local y="$1" x="$2" s="$3" i n=${#3}
+    for (( i = 0; i < n; i++ )); do _cv_set "$y" $(( x + i )) "${s:i:1}"; done
+    return 0
+}
+_cv_hline() { local y="$1" x; for (( x = $2; x <= $3; x++ )); do _cv_set "$y" "$x" '-'; done; return 0; }
+_cv_vline() { local x="$1" y; for (( y = $2; y <= $3; y++ )); do _cv_set "$y" "$x" '|'; done; return 0; }
+
+_cv_box() {
+    local node="$1" x="$2" y="$3" w="${_W[$node]}"
+    local id sub bar
+    id=$(_ascii_fit "$node" "$w")
+    sub=$(_ascii_fit "$(_ascii_node_sub "$node")" "$w")
+    bar="+$(_ascii_repeat '-' $(( w + 2 )))+"
+    _cv_text "$y"        "$x" "$bar"
+    _cv_text $(( y + 1 )) "$x" "$(printf '| %-*s |' "$w" "$id")"
+    _cv_text $(( y + 2 )) "$x" "$(printf '| %-*s |' "$w" "$sub")"
+    _cv_text $(( y + 3 )) "$x" "$bar"
+    return 0
+}
+
+# Assign each node a top row: leaves take the next free band, internal nodes are
+# centred on their first and last child.  Depends on _BOXH/_VGAP/_COFF globals.
+_lr_layout() {
+    local node="$1"
+    [[ -n "${_TOP[$node]:-}" ]] && return 0       # shared node already placed
+
+    _ascii_children "$node"
+    local kids=()
+    (( ${#_CKIDS[@]} )) && kids=("${_CKIDS[@]}")
+    local n=${#kids[@]}
+
+    if (( n == 0 )); then
+        _TOP[$node]=$_LR_ROW
+        _LR_ROW=$(( _LR_ROW + _BOXH + _VGAP ))
+        return 0
+    fi
+
+    local c
+    for c in "${kids[@]}"; do _lr_layout "$c"; done
+
+    local cf=$(( _TOP[${kids[0]}] + _COFF )) cl=$(( _TOP[${kids[n-1]}] + _COFF ))
+    local center=$(( (cf + cl) / 2 ))
+    _TOP[$node]=$(( center - _COFF ))
+    (( _TOP[$node] < 0 )) && _TOP[$node]=0
+    return 0
+}
+
+_ascii_lr() {
+    declare -A _CV=(); local _CV_MAXX=0 _CV_MAXY=0
+    declare -A _W=() _OW=() _DEPTH=() _TOP=() _COLW=() _COLX=() _GAP=()
+    local _BOXH=4 _VGAP=2 _COFF=1 _LR_ROW=0
+    local node i
+
+    # Box widths and a first guess at depth (0 = root).
+    for node in "${_GR_NODE_IDS[@]}"; do
+        local sub; sub=$(_ascii_node_sub "$node")
+        local w=${#node}
+        (( ${#sub} > w )) && w=${#sub}
+        (( w > 72 )) && w=72
+        _W[$node]=$w; _OW[$node]=$(( w + 4 )); _DEPTH[$node]=0
+    done
+
+    # Edges always run earlier→later, so one ordered pass fixes every depth as the
+    # longest path from a root.
+    for node in "${_GR_NODE_IDS[@]}"; do
+        _ascii_children "$node"
+        local c
+        for c in ${_CKIDS[@]+"${_CKIDS[@]}"}; do
+            local nd=$(( _DEPTH[$node] + 1 ))
+            (( nd > ${_DEPTH[$c]:-0} )) && _DEPTH[$c]=$nd
+        done
+    done
+
+    local maxd=0
+    for node in "${_GR_NODE_IDS[@]}"; do (( _DEPTH[$node] > maxd )) && maxd=${_DEPTH[$node]}; done
+
+    # Per-column box width and per-column connector gap (wide enough for its
+    # widest edge label, drawn on the connector line).
+    for node in "${_GR_NODE_IDS[@]}"; do
+        local d=${_DEPTH[$node]}
+        (( ${_OW[$node]} > ${_COLW[$d]:-0} )) && _COLW[$d]=${_OW[$node]}
+    done
+    for (( i = 0; i < ${#_GR_EDGE_FROM[@]}; i++ )); do
+        local d=${_DEPTH[${_GR_EDGE_FROM[$i]}]}
+        local lbl="${_GR_EDGE_LABEL[$i]//$'\n'/ }"
+        local need=$(( ${#lbl} + 6 ))
+        (( need > ${_GAP[$d]:-8} )) && _GAP[$d]=$need
+    done
+    local d
+    for (( d = 0; d <= maxd; d++ )); do : "${_COLW[$d]:=0}" "${_GAP[$d]:=8}"; done
+    _COLX[0]=0
+    for (( d = 1; d <= maxd; d++ )); do
+        _COLX[$d]=$(( ${_COLX[$((d-1))]} + ${_COLW[$((d-1))]} + ${_GAP[$((d-1))]} ))
+    done
+
+    # Vertical placement: lay out each root's subtree, then any unreached node.
+    declare -A _indeg=()
+    for (( i = 0; i < ${#_GR_EDGE_TO[@]}; i++ )); do _indeg["${_GR_EDGE_TO[$i]}"]=1; done
+    for node in "${_GR_NODE_IDS[@]}"; do
+        [[ -n "${_indeg[$node]:-}" ]] && continue
+        _lr_layout "$node"
+    done
+    for node in "${_GR_NODE_IDS[@]}"; do
+        [[ -n "${_TOP[$node]:-}" ]] && continue
+        _lr_layout "$node"
+    done
+
+    # Paint boxes.
+    for node in "${_GR_NODE_IDS[@]}"; do
+        _cv_box "$node" "${_COLX[${_DEPTH[$node]}]}" "${_TOP[$node]}"
+    done
+
+    # Paint connectors: a stub off the parent's right edge to a vertical bus, then
+    # one labelled arrow per child into its left edge.
+    for node in "${_GR_NODE_IDS[@]}"; do
+        _ascii_children "$node"
+        local kids=() labs=()
+        (( ${#_CKIDS[@]} )) && kids=("${_CKIDS[@]}")
+        (( ${#_CLABS[@]} )) && labs=("${_CLABS[@]}")
+        local n=${#kids[@]}
+        (( n == 0 )) && continue
+
+        local pd=${_DEPTH[$node]}
+        local px2=$(( _COLX[$pd] + _OW[$node] - 1 ))
+        local pay=$(( _TOP[$node] + _COFF ))
+        local jx=$(( px2 + 2 ))
+
+        local miny=$pay maxy=$pay k c cay
+        for (( k = 0; k < n; k++ )); do
+            cay=$(( _TOP[${kids[$k]}] + _COFF ))
+            (( cay < miny )) && miny=$cay
+            (( cay > maxy )) && maxy=$cay
+        done
+        _cv_hline "$pay" $(( px2 + 1 )) "$jx"
+        _cv_vline "$jx" "$miny" "$maxy"
+        _cv_set "$pay" "$jx" '+'
+
+        for (( k = 0; k < n; k++ )); do
+            c=${kids[$k]}
+            local cd=${_DEPTH[$c]} cx=${_COLX[${_DEPTH[$c]}]}
+            cay=$(( _TOP[$c] + _COFF ))
+            _cv_hline "$cay" $(( jx + 1 )) $(( cx - 1 ))
+            _cv_set "$cay" $(( cx - 1 )) '>'
+            _cv_set "$cay" "$jx" '+'
+            local lbl="${labs[$k]//$'\n'/ }"
+            lbl=$(_ascii_fit "$lbl" $(( cx - jx - 3 )))
+            [[ -n "$lbl" ]] && _cv_text "$cay" $(( jx + 2 )) "$lbl"
+        done
+    done
+
+    # Emit the canvas, trimming each line's trailing blanks.
+    local y x line cell
+    for (( y = 0; y <= _CV_MAXY; y++ )); do
+        line=''
+        for (( x = 0; x <= _CV_MAXX; x++ )); do cell="${_CV[$y,$x]:- }"; line+="$cell"; done
+        printf '%s\n' "${line%"${line##*[![:space:]]}"}"
+    done
+    return 0
+}
+
+_output_ascii() {
+    if [[ "$_GR_ORIENT" == 'tb' ]]; then _ascii_tb; else _ascii_lr; fi
 }
 
 _output_json() {

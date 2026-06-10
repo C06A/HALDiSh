@@ -361,17 +361,91 @@ teardown() {
     [[ "$output" != *$'\n''1 -->'* ]]
 }
 
-@test "grapher --format ascii shows nodes and arrows" {
+@test "grapher --format plantuml keeps a multi-line edge label on one line" {
+    # A templated link records a path segment plus a binding, so the edge label
+    # spans two lines.  A bare newline would split the `A --> B : ...` statement
+    # and break PlantUML; the break must be the literal \n instead.
+    _group g1 \
+        --url 'https://api.example.com/' \
+        --body '{"_links":{"self":{"href":"/"},"tmpl":{"href":"/items/1","templated":true}}}'
+    _group g2 \
+        --url 'https://api.example.com/items/1' \
+        --source 'g1.body' --halpath $'links\ntmpl' --bindings 'id=1'
+    run bash "$GRAPHER_SH" --format plantuml "$WORK_DIR"
+    [ "$status" -eq 0 ]
+    # The label rides one physical line with an escaped break.
+    [[ "$output" == *'g1 --> g2 : links tmpl\nid=1'* ]]
+    # The binding never appears as its own bare line.
+    [[ "$output" != *$'\n''id=1'* ]]
+}
+
+@test "grapher --format ascii --orientation tb draws a boxed indented tree" {
     _group g1 \
         --url 'https://api.example.com/items' \
         --body '{"_links":{"self":{"href":"/items"},"item":[{"href":"/items/1"}]}}'
     _group g2 \
         --url 'https://api.example.com/items/1'
+    run bash "$GRAPHER_SH" --format ascii --orientation tb "$WORK_DIR"
+    [ "$status" -eq 0 ]
+    # Each node is a rectangle labelled with its base name.
+    [[ "$output" == *'│ g1'* ]]
+    [[ "$output" == *'│ g2'* ]]
+    # Box borders are drawn.
+    [[ "$output" == *'┌'* ]]
+    [[ "$output" == *'└'* ]]
+    # The child hangs off a tree branch connector.
+    [[ "$output" == *'└─ '* || "$output" == *'├─ '* ]]
+}
+
+@test "grapher --format ascii --orientation tb branches one parent to two children" {
+    _group g1 \
+        --url 'https://api.example.com/' \
+        --body '{"_links":{"self":{"href":"/"},"a":{"href":"/a"},"b":{"href":"/b"}}}'
+    _group g2 --url 'https://api.example.com/a'
+    _group g3 --url 'https://api.example.com/b'
+    run bash "$GRAPHER_SH" --format ascii --orientation tb "$WORK_DIR"
+    [ "$status" -eq 0 ]
+    # First of two siblings uses ├─, the last uses └─.
+    [[ "$output" == *'├─ '* ]]
+    [[ "$output" == *'└─ '* ]]
+    [[ "$output" == *'│ g2'* ]]
+    [[ "$output" == *'│ g3'* ]]
+}
+
+@test "grapher --format ascii --orientation lr flows boxes rightward with arrows" {
+    _group g1 \
+        --url 'https://api.example.com/' \
+        --body '{"_links":{"self":{"href":"/"},"a":{"href":"/a"}}}'
+    _group g2 --url 'https://api.example.com/a'
+    run bash "$GRAPHER_SH" --format ascii --orientation lr "$WORK_DIR"
+    [ "$status" -eq 0 ]
+    # ASCII boxes with a + corner and an arrowhead into the child.
+    [[ "$output" == *'+--'* ]]
+    [[ "$output" == *'| g1'* ]]
+    [[ "$output" == *'| g2'* ]]
+    [[ "$output" == *'>'* ]]
+    # A linear chain flows along one row: g1 on the left, an arrow, then g2.
+    local g1row
+    g1row=$(printf '%s\n' "$output" | grep '| g1')
+    [[ "$g1row" == *'g1'*'>'*'g2'* ]]
+}
+
+@test "grapher --format ascii defaults to lr and differs from tb" {
+    _group g1 \
+        --url 'https://api.example.com/' \
+        --body '{"_links":{"self":{"href":"/"},"a":{"href":"/a"}}}'
+    _group g2 --url 'https://api.example.com/a'
     run bash "$GRAPHER_SH" --format ascii "$WORK_DIR"
     [ "$status" -eq 0 ]
-    [[ "$output" == *'[g1]'* ]]
-    [[ "$output" == *'--> g2'* ]]
-    [[ "$output" == *'<-- g1'* ]]
+    local def="$output"
+    run bash "$GRAPHER_SH" --format ascii --orientation lr "$WORK_DIR"
+    local lr="$output"
+    run bash "$GRAPHER_SH" --format ascii --orientation tb "$WORK_DIR"
+    local tb="$output"
+    # Default orientation is lr.
+    [ "$def" = "$lr" ]
+    # The two orientations produce genuinely different drawings.
+    [ "$lr" != "$tb" ]
 }
 
 @test "grapher --format json produces valid JSON" {
