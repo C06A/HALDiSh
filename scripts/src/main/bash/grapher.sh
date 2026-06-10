@@ -16,6 +16,13 @@
 # if more than one href in the chosen body matches, the guess is ambiguous and
 # the edge label is flagged "(guessed: N matches)".
 #
+# Visualization:
+#   dot:       graphviz (brew install graphviz, then `dot -Tpng -o graph.png`)
+#   mermaid:   https://mermaid.ai/live
+#   plantuml:  http://www.plantuml.com/plantuml/uml/ (paste into the URL path)
+#   ascii:     any text editor or terminal
+#   json:      any text editor or jq/yq for manipulation
+#
 # Requires: jq (JSON), yq (XML/YAML), hal.sh (self-link extraction)
 set -euo pipefail
 
