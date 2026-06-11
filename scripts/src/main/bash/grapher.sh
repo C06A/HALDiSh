@@ -2,7 +2,7 @@
 # grapher.sh — Build a navigation graph from HAL session files
 #
 # Usage:
-#   grapher.sh [--format dot|mermaid|plantuml|ascii|json] [--orientation lr|tb] [DIR]
+#   grapher.sh [--format dot|mermaid|plantuml|ascii|json|svg] [--orientation lr|tb] [DIR]
 #
 # Scans DIR (default: .) for files with extensions .url .curl .body .json .xml
 # .yaml .yml, groups them by shared basename, and emits a graph showing which
@@ -22,6 +22,7 @@
 #   plantuml:  http://www.plantuml.com/plantuml/uml/ (paste into the URL path)
 #   ascii:     any text editor or terminal
 #   json:      any text editor or jq/yq for manipulation
+#   svg:       self-contained <svg> document (no external tools); open in a browser
 #
 # Requires: jq (JSON), yq (XML/YAML), hal.sh (self-link extraction)
 set -euo pipefail
@@ -83,8 +84,8 @@ _parse_args() {
     done
 
     case "$_GR_FORMAT" in
-        dot|mermaid|plantuml|ascii|json) ;;
-        *) hal::log::die "grapher: unknown format '$_GR_FORMAT'. Use: dot mermaid plantuml ascii json" ;;
+        dot|mermaid|plantuml|ascii|json|svg) ;;
+        *) hal::log::die "grapher: unknown format '$_GR_FORMAT'. Use: dot mermaid plantuml ascii json svg" ;;
     esac
     case "$_GR_ORIENT" in
         lr|tb) ;;
@@ -799,6 +800,16 @@ _esc_plantuml() {
     printf '%s' "$s"
 }
 
+# Escape text for an SVG/XML text node or attribute value.
+_esc_xml() {
+    local s="$1"
+    s="${s//&/&amp;}"
+    s="${s//</&lt;}"
+    s="${s//>/&gt;}"
+    s="${s//\"/&quot;}"
+    printf '%s' "$s"
+}
+
 # Emit a valid Mermaid node ID (letters, digits, underscore, hyphen)
 _mermaid_id() {
     printf '%s' "$1" | tr -c 'a-zA-Z0-9_-' '_'
@@ -1075,10 +1086,11 @@ _lr_layout() {
     return 0
 }
 
-_ascii_lr() {
-    declare -A _CV=(); local _CV_MAXX=0 _CV_MAXY=0
-    declare -A _W=() _OW=() _DEPTH=() _TOP=() _COLW=() _COLX=() _GAP=()
-    local _BOXH=4 _VGAP=2 _COFF=1 _LR_ROW=0
+# Compute the left-to-right tidy-tree geometry in character cells.  The caller
+# declares the maps _W/_OW/_DEPTH/_TOP/_COLW/_COLX/_GAP and the _BOXH/_VGAP/_COFF
+# /_LR_ROW scalars; this fills them and sets _LR_MAXD to the deepest column.
+# Shared by the ascii LR canvas and the native SVG renderer.
+_lr_compute_layout() {
     local node i
 
     # Box widths and a first guess at depth (0 = root).
@@ -1134,6 +1146,18 @@ _ascii_lr() {
         [[ -n "${_TOP[$node]:-}" ]] && continue
         _lr_layout "$node"
     done
+
+    _LR_MAXD=$maxd
+    return 0
+}
+
+_ascii_lr() {
+    declare -A _CV=(); local _CV_MAXX=0 _CV_MAXY=0
+    declare -A _W=() _OW=() _DEPTH=() _TOP=() _COLW=() _COLX=() _GAP=()
+    local _BOXH=4 _VGAP=2 _COFF=1 _LR_ROW=0 _LR_MAXD=0
+    local node i
+
+    _lr_compute_layout
 
     # Paint boxes.
     for node in "${_GR_NODE_IDS[@]}"; do
@@ -1192,6 +1216,105 @@ _output_ascii() {
     if [[ "$_GR_ORIENT" == 'tb' ]]; then _ascii_tb; else _ascii_lr; fi
 }
 
+# Render a self-contained SVG directly from the tidy-tree geometry — no external
+# renderer.  Character-cell layout (shared with the ascii LR canvas) is scaled to
+# pixels: CW per column, RY per band row.  Orientation lr flows depth along x and
+# stacks siblings along y; tb transposes (depth → y, siblings → x).
+_output_svg() {
+    declare -A _W=() _OW=() _DEPTH=() _TOP=() _COLW=() _COLX=() _GAP=()
+    local _BOXH=4 _VGAP=2 _COFF=1 _LR_ROW=0 _LR_MAXD=0
+    _lr_compute_layout
+
+    local CW=8 RY=10 node i
+    local tb=0; [[ "$_GR_ORIENT" == 'tb' ]] && tb=1
+
+    # For tb the sibling axis is horizontal, so its pitch must clear the widest
+    # box; derive a uniform band unit (in chars) from the maximum box width.
+    local maxow=0
+    for node in "${_GR_NODE_IDS[@]}"; do (( _OW[$node] > maxow )) && maxow=${_OW[$node]}; done
+    local pitch=$(( _BOXH + _VGAP )) bandunit=$(( maxow + 4 ))
+
+    # Pixel rectangle per node, and the overall canvas extent.
+    declare -A _BX=() _BY=() _BW=() _BH=()
+    local maxx=0 maxy=0
+    for node in "${_GR_NODE_IDS[@]}"; do
+        local d=${_DEPTH[$node]} x y
+        if (( tb )); then
+            x=$(( _TOP[$node] * bandunit * CW / pitch ))
+            y=$(( d * pitch * RY ))
+        else
+            x=$(( _COLX[$d] * CW ))
+            y=$(( _TOP[$node] * RY ))
+        fi
+        local w=$(( _OW[$node] * CW )) h=$(( _BOXH * RY ))
+        _BX[$node]=$x; _BY[$node]=$y; _BW[$node]=$w; _BH[$node]=$h
+        (( x + w > maxx )) && maxx=$(( x + w ))
+        (( y + h > maxy )) && maxy=$(( y + h ))
+    done
+
+    local pad=20
+    local cw=$(( maxx + pad )) ch=$(( maxy + pad ))
+    (( cw < 40 )) && cw=40
+    (( ch < 40 )) && ch=40
+
+    printf '<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="%d" viewBox="0 0 %d %d" font-family="monospace" font-size="12">\n' \
+        "$cw" "$ch" "$cw" "$ch"
+    printf '  <defs><marker id="arrow" markerWidth="10" markerHeight="8" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">'
+    printf '<path d="M0,0 L8,3 L0,6 Z" fill="#333"/></marker></defs>\n'
+    printf '  <rect width="100%%" height="100%%" fill="white"/>\n'
+
+    # Edges first so the boxes paint over their endpoints.
+    for (( i = 0; i < ${#_GR_EDGE_FROM[@]}; i++ )); do
+        local f="${_GR_EDGE_FROM[$i]}" t="${_GR_EDGE_TO[$i]}"
+        [[ -z "${_BX[$f]:-}" || -z "${_BX[$t]:-}" ]] && continue
+        local ox oy ix iy lx ly path
+        if (( tb )); then
+            ox=$(( _BX[$f] + _BW[$f]/2 )); oy=$(( _BY[$f] + _BH[$f] ))
+            ix=$(( _BX[$t] + _BW[$t]/2 )); iy=${_BY[$t]}
+            local my=$(( (oy + iy)/2 ))
+            path="M $ox $oy V $my H $ix V $iy"
+            lx=$(( (ox + ix)/2 + 4 )); ly=$(( my - 3 ))
+        else
+            ox=$(( _BX[$f] + _BW[$f] )); oy=$(( _BY[$f] + _BH[$f]/2 ))
+            ix=${_BX[$t]};              iy=$(( _BY[$t] + _BH[$t]/2 ))
+            local mx=$(( (ox + ix)/2 ))
+            path="M $ox $oy H $mx V $iy H $ix"
+            lx=$(( mx + 4 )); ly=$(( (oy + iy)/2 - 3 ))
+        fi
+        local stroke='#333'
+        [[ "${_GR_EDGE_GUESS[$i]:-}" == 'ambiguous' ]] && stroke='#c33'
+        printf '  <path d="%s" fill="none" stroke="%s" marker-end="url(#arrow)"/>\n' "$path" "$stroke"
+
+        # Edge label: one <text> per non-empty line, stacked downward.
+        local lbl="${_GR_EDGE_LABEL[$i]}" line
+        if [[ -n "$lbl" ]]; then
+            while IFS= read -r line; do
+                [[ -z "$line" ]] && continue
+                printf '  <text x="%d" y="%d" font-size="10" fill="#555">%s</text>\n' \
+                    "$lx" "$ly" "$(_esc_xml "$line")"
+                ly=$(( ly + 11 ))
+            done <<< "$lbl"
+        fi
+    done
+
+    # Boxes: id on the upper line, "METHOD url" below (both fitted to box width).
+    for node in "${_GR_NODE_IDS[@]}"; do
+        local x=${_BX[$node]} y=${_BY[$node]} w=${_BW[$node]} h=${_BH[$node]}
+        local id sub
+        id=$(_ascii_fit "$node" "${_W[$node]}")
+        sub=$(_ascii_fit "$(_ascii_node_sub "$node")" "${_W[$node]}")
+        printf '  <rect x="%d" y="%d" width="%d" height="%d" rx="4" fill="#f5f5f5" stroke="#333"/>\n' \
+            "$x" "$y" "$w" "$h"
+        printf '  <text x="%d" y="%d" font-weight="bold">%s</text>\n' \
+            "$(( x + 6 ))" "$(( y + h/2 - 2 ))" "$(_esc_xml "$id")"
+        printf '  <text x="%d" y="%d" fill="#444">%s</text>\n' \
+            "$(( x + 6 ))" "$(( y + h/2 + 13 ))" "$(_esc_xml "$sub")"
+    done
+
+    printf '</svg>\n'
+    return 0
+}
+
 _output_json() {
     printf '{\n  "nodes": [\n'
     local first=1 b
@@ -1233,6 +1356,7 @@ main() {
         plantuml) _output_plantuml ;;
         ascii)    _output_ascii ;;
         json)     _output_json ;;
+        svg)      _output_svg ;;
     esac
 }
 

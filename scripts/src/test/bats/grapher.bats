@@ -293,6 +293,47 @@ teardown() {
     [[ "$output" == *'rankdir=TB'* ]]
 }
 
+@test "grapher --format svg renders a self-contained SVG with no external tools" {
+    _group g1 \
+        --url 'https://api.example.com/' \
+        --body '{"_links":{"self":{"href":"/"},"a":{"href":"/a"}}}'
+    _group g2 --url 'https://api.example.com/a'
+    run bash "$GRAPHER_SH" --format svg "$WORK_DIR"
+    [ "$status" -eq 0 ]
+    # Native <svg> root with the xmlns and both node basenames carried through.
+    [[ "$output" == *'<svg xmlns="http://www.w3.org/2000/svg"'* ]]
+    [[ "$output" == *'</svg>'* ]]
+    [[ "$output" == *'>g1<'* ]]
+    [[ "$output" == *'>g2<'* ]]
+    # The edge is drawn as an arrowed path.
+    [[ "$output" == *'marker-end="url(#arrow)"'* ]]
+}
+
+@test "grapher --format svg escapes XML metacharacters in labels" {
+    # A query string in the URL puts & and = into the node sub-line.
+    _group g1 --url 'https://api.example.com/?a=1&b=2'
+    run bash "$GRAPHER_SH" --format svg "$WORK_DIR"
+    [ "$status" -eq 0 ]
+    # The raw ampersand is escaped; no bare & survives in the output.
+    [[ "$output" == *'&amp;'* ]]
+    [[ "$output" != *'&b=2'* ]]
+}
+
+@test "grapher --format svg lr and tb produce different geometry" {
+    _group g1 \
+        --url 'https://api.example.com/' \
+        --body '{"_links":{"self":{"href":"/"},"a":{"href":"/a"},"b":{"href":"/b"}}}'
+    _group g2 --url 'https://api.example.com/a'
+    _group g3 --url 'https://api.example.com/b'
+    run bash "$GRAPHER_SH" --format svg --orientation lr "$WORK_DIR"
+    [ "$status" -eq 0 ]
+    local lr="$output"
+    run bash "$GRAPHER_SH" --format svg --orientation tb "$WORK_DIR"
+    [ "$status" -eq 0 ]
+    local tb="$output"
+    [ "$lr" != "$tb" ]
+}
+
 @test "grapher --format mermaid default orientation is LR" {
     _group g1 --url 'https://api.example.com/'
     run bash "$GRAPHER_SH" --format mermaid "$WORK_DIR"
