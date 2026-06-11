@@ -14,6 +14,47 @@ document navigation.  It is aimed at shell scripters, API developers, and CI
 pipelines that need to drive or document hypermedia APIs without introducing
 heavyweight runtime dependencies.
 
+== NaHAL — Multi-platform GUI and library
+
+https://github.com/C06A/NaHAL[NaHAL] is a companion project that provides
+graphical and programmatic access to the same HAL browsing and navigation
+capabilities as HALDiSh, with support for multiple platforms and languages:
+
+* **JVM** — Java library and Swing desktop application
+* **JavaScript** — Browser-based and Node.js library
+* **macOS** — Native Cocoa application
+* **iOS** — Native app for iPhone and iPad
+* **Linux** — Native desktop application (GTK)
+* **Windows** — Native Windows application
+
+NaHAL is ideal for interactive API exploration, visual graph analysis, and
+cross-platform tooling where a CLI is not practical.  Both HALDiSh and NaHAL
+share the same underlying HAL semantics and can work with the same response
+files and session data.
+
+== Testing with MockingHAL
+
+https://github.com/C06A/MockingHAL[MockingHAL] is a testing companion that
+allows you to mock HAL (or any REST) API servers without external dependencies.
+It enables rapid development and testing of HALDiSh scripts and workflows by
+providing:
+
+* **Instant mock servers** — define resources and responses as simple YAML/JSON
+* **Link templates** — test URI template expansion and variable binding
+* **Embedded resources** — verify navigation through nested HAL structures
+* **Dynamic responses** — simulate different server states for error scenarios
+* **Stateless setup** — no database or complex configuration needed
+
+MockingHAL is particularly useful for:
+
+* Unit and integration testing of HALDiSh scripts
+* CI/CD pipelines that need to validate API clients without live servers
+* API specification and documentation (spec-driven testing)
+* Regression testing across HAL API versions
+
+See the https://github.com/C06A/MockingHAL[MockingHAL repository] for setup and
+example configurations.
+
 == Obtaining the archive
 
 === From GitHub Releases

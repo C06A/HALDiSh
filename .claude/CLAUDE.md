@@ -84,6 +84,12 @@ in `setup()` and removed in `teardown()`. Use `run --separate-stderr` when asser
 Tool-absence tests inject broken stubs by prepending a stub directory to `PATH` — stubs must fail both `command -v` + functional verification
 (`printf '{}' | tool '.'`).
 
+### Related projects
+
+**NaHAL** — Multi-platform graphical and library implementation for HAL browsing. Provides GUI applications for macOS, iOS, Linux, Windows, plus JVM and JavaScript libraries. See https://github.com/C06A/NaHAL.
+
+**MockingHAL** — Mock HAL/REST servers for testing HALDiSh scripts and workflows. Define resources and responses as YAML/JSON; supports link templates, embedded resources, and dynamic scenarios. See https://github.com/C06A/MockingHAL.
+
 ### README
 
 `README.asciidoc` is the source of truth.
