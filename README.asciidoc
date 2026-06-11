@@ -1350,7 +1350,7 @@ grapher.sh [--format <fmt>] [--orientation <orient>] [DIR]
 |Option |Description
 
 |`--format <fmt>` (default: `dot`)
-|Output format: `dot` (Graphviz), `mermaid`, `plantuml`, `ascii`, or `json`.
+|Output format: `dot` (Graphviz), `mermaid`, `plantuml`, `ascii`, `svg`, or `json`.
 
 |`--orientation <orient>` (default: `lr`)
 |Graph direction: `lr` (left-to-right) or `tb` (top-to-bottom).
@@ -1375,6 +1375,13 @@ grapher.sh [--format <fmt>] [--orientation <orient>] [DIR]
 |`plantuml`
 |PlantUML server or `plantuml` CLI.  Supports `--orientation` (left-to-right or
 default top-to-bottom).
+
+|`svg`
+|Scalable Vector Graphics document; rendered directly from the tidy-tree layout
+with no external tools required.  Open in any web browser or image viewer.
+Supports `--orientation` (left-to-right or top-to-bottom). Boxes show node ID
+and request method+URL; edges are arrowed connectors with labels. Guessed edges
+(edge origin uncertain) render in red.
 
 |`ascii`
 |Human-readable text output for the terminal or plain-text reports.  Shows nodes,
@@ -1863,8 +1870,8 @@ code specificity.
 |`grapher.bats`
 |`grapher.sh` — session directory scanning, URL/link extraction, graph
 construction, recorded (sidecar-based) vs. guessed (matched-href) edge origin,
-ambiguity flagging, output formats (dot, mermaid, plantuml, ascii, json),
-orientation control.
+ambiguity flagging, output formats (dot, mermaid, plantuml, ascii, svg, json),
+orientation control, native SVG rendering.
 
 |`hal_basename.bats`
 |`hal_basename.sh` — `-p` numbering (first/next, numeric vs string compare,
