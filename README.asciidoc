@@ -696,6 +696,69 @@ haldoclink.sh resource.json links doc:orders \
 ----
 
 
+== `halcurie.sh` — expand a CURIE-prefixed link href (link plugin)
+
+A `HAL_LINK_PLUGIN` that rewrites a link whose `href` is a CURIE
+(`<prefix>:<reference>`, e.g. `ord:widget`) into a full URL.  It follows the
+project plugin contract: the link object arrives as JSON on **stdin**, the
+**arguments** are the root resource file followed by the HAL path that leads to
+the link, and the (possibly rewritten) link JSON is written to **stdout**.
+
+A href "looks like a CURIE" when its part before the first `:` is an NCName.
+The prefix is resolved against the first entry of an `_links.CURIE` collection
+— uppercase and singular, holding either a single link object or an array —
+whose `name` equals the prefix.  Unlike the lowercase `curies` of the HAL spec,
+a `CURIE` href is a plain URL with no `{rel}` template; expansion simply
+replaces the `<prefix>:` of the original href with that URL.
+
+The definition is searched from the resource that holds the link upward through
+the embedded stack to the root.  Rather than load sub-resources into memory, the
+plugin re-queries the root file with `hal.sh`: it swaps the trailing
+`links <rel>` of the supplied path for `links CURIE <prefix> href` (selecting an
+array entry by its `name`), falling back to a single `CURIE` object whose `name`
+it asserts equals the prefix; on each miss it drops the last `embeddeds …`
+segment to step up to the parent.
+
+Because a URL scheme also parses as `<prefix>:…`, an href whose scheme has no
+matching `CURIE` definition (e.g. `http:`) is left untouched — as are an unknown
+prefix, a prefix-less or absent href, and the case where no root file argument
+was supplied.  All of these pass the link through unchanged and exit `0`.
+
+Requires `yq` (mikefarah/yq v4) or `jq` for JSON, and `hal.sh` on `PATH`.
+
+=== Usage
+
+Set it as a link plugin (alone, or colon-joined with others), then browse with
+`nahal.sh`:
+
+[source,bash]
+----
+export HAL_LINK_PLUGIN=halcurie.sh
+nahal.sh https://api.example.com/
+----
+
+It can also be exercised directly — link JSON on stdin, root file plus HAL path
+as arguments:
+
+[source,bash]
+----
+printf '{"href":"ord:widget"}' \
+  | halcurie.sh resource.json embeddeds orders 0 links product
+# → {"href":"https://api.example.com/orders/widget"}
+----
+
+=== Exit codes
+
+[cols="1,3",options="header"]
+|===
+|Code |Meaning
+
+|0 |Success — href expanded, or intentionally left unchanged.
+|4 |Required tool (`yq` or `jq`) not available.
+|5 |Link object on stdin is not valid JSON.
+|===
+
+
 == `halprepend.sh` — prepend a base URL to a HAL link's href
 
 Replaces a HAL link object's `href` field with `<base> + <href>`, leaving all
@@ -1899,6 +1962,12 @@ flexibility and the inline-link `.source` omission).
 |`haldoclink.sh` — curie lookup at root and embedded levels, upward-stack
 search, unprefixed-rel suffix matching, deep nesting, basename resolution,
 format preservation, exit code specificity.
+
+|`halcurie.bats`
+|`halcurie.sh` — CURIE href expansion from single-object and array `CURIE`
+collections, upward-stack search, pass-through of URL schemes / unknown
+prefixes / prefix-less / no-href / no-root-file, sibling-field preservation,
+`jq`-only path, exit code specificity.
 
 |`halprepend.bats`
 |`halprepend.sh` — `--link` and file+path modes, base concatenation, field
