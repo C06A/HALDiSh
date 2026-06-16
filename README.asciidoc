@@ -462,6 +462,46 @@ or a raw upload — the same `-a`/`-u`/`-f`/`-b`/`-r` inputs as `httpreq.sh`.  A
 dropped `file://` path (for example from a macOS Finder drag) is accepted and
 percent-decoded.
 
+=== Link plugins
+
+Both link following and documentation resolution run each link through
+`HAL_LINK_PLUGIN` — a colon-separated list of scripts that transform link JSON
+before it is used.  This allows plugins to rewrite, filter, or augment links
+without modifying `nahal.sh`.  Plugins are optional and configured via an
+environment variable; `nahal.sh` works identically without them.
+
+**Example: CURIE expansion**
+
+To automatically expand CURIE-prefixed link hrefs (e.g. `ord:widget` →
+`https://api.example.com/orders/widget`), enable the built-in `halcurie.sh`
+plugin:
+
+[source,bash]
+----
+export HAL_LINK_PLUGIN=halcurie.sh
+nahal.sh https://api.example.com/
+----
+
+When enabled, every link is run through `halcurie.sh` before being followed,
+including documentation links resolved by the `docs` menu.  If a link's `href`
+is a CURIE (looks like `prefix:reference`), the plugin resolves the prefix
+against the resource stack and replaces `prefix:` with the CURIE's URL.  Links
+without a resolvable CURIE (real URLs like `http://…`, unknown prefixes,
+prefix-less hrefs) pass through unchanged.  See <<_halcurie_sh_expand_a_curie_prefixed_link_href_link_plugin,`halcurie.sh`>> for details.
+
+**Chaining plugins**
+
+Multiple plugins can be chained by separating them with colons:
+
+[source,bash]
+----
+export HAL_LINK_PLUGIN=halcurie.sh:custom-plugin.sh
+----
+
+Each plugin reads link JSON on stdin and writes the (possibly modified) link
+JSON to stdout.  Plugins are invoked in order; the output of one becomes the
+input to the next.
+
 === Session replay
 
 `session.sh` reproduces the session without `nahal.sh`: each step numbers its
@@ -633,10 +673,17 @@ hallink.sh resource.json links next \
 == `haldoclink.sh` — emit a documentation link for a HAL link relation
 
 Resolves the documentation URL for a HAL link relation by expanding the
-matching curie template, then outputs a HAL link object with that URL as
-`href` and `"type":"text/html"`.
+matching template from `_links.curies`, then outputs a HAL link object with
+that URL as `href` and `"type":"text/html"`.
 
-Curie lookup starts at the deepest embedded resource that contains the target
+**Note on terminology:** This script uses `_links.curies` (lowercase), which is
+the HAL specification's own templating mechanism for documentation links. It is
+not a proper CURIE in the W3C standard sense (which `halcurie.sh` implements via
+uppercase `_links.CURIE`). The HAL spec's "curies" feature includes URI templates
+(e.g. `https://example.com/docs/{rel}`); proper CURIEs are simple prefix mappings
+(e.g. `https://example.com/docs/`) with no templates.
+
+Lookup starts at the deepest embedded resource that contains the target
 link and walks up through each enclosing embedded resource to the root, using
 the first ancestor whose `_links.curies` defines the required prefix.
 
@@ -698,18 +745,24 @@ haldoclink.sh resource.json links doc:orders \
 
 == `halcurie.sh` — expand a CURIE-prefixed link href (link plugin)
 
-A `HAL_LINK_PLUGIN` that rewrites a link whose `href` is a CURIE
-(`<prefix>:<reference>`, e.g. `ord:widget`) into a full URL.  It follows the
-project plugin contract: the link object arrives as JSON on **stdin**, the
-**arguments** are the root resource file followed by the HAL path that leads to
-the link, and the (possibly rewritten) link JSON is written to **stdout**.
+A `HAL_LINK_PLUGIN` that rewrites a link whose `href` is a proper CURIE
+(Compact URI per W3C standard: `<prefix>:<reference>`, e.g. `ord:widget`)
+into a full URL.  It follows the project plugin contract: the link object
+arrives as JSON on **stdin**, the **arguments** are the root resource file
+followed by the HAL path that leads to the link, and the (possibly rewritten)
+link JSON is written to **stdout**.
 
 A href "looks like a CURIE" when its part before the first `:` is an NCName.
 The prefix is resolved against the first entry of an `_links.CURIE` collection
 — uppercase and singular, holding either a single link object or an array —
-whose `name` equals the prefix.  Unlike the lowercase `curies` of the HAL spec,
-a `CURIE` href is a plain URL with no `{rel}` template; expansion simply
-replaces the `<prefix>:` of the original href with that URL.
+whose `name` equals the prefix.
+
+**CURIE vs HAL's "curies":** This script implements proper W3C CURIEs via
+uppercase `_links.CURIE` with plain URL prefixes (e.g. `https://api.example.com/orders/`).
+Unlike the HAL spec's lowercase `_links.curies` (which are URI templates for
+documentation, used by `haldoclink.sh`), a `CURIE` href is a static URL with
+no `{rel}` template; expansion simply replaces the `<prefix>:` of the original
+href with that URL.
 
 The definition is searched from the resource that holds the link upward through
 the embedded stack to the root.  Rather than load sub-resources into memory, the
