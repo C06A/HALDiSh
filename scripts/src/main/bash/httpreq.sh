@@ -21,9 +21,10 @@
 #
 # Exactly one URL source may be given (a bare <url>, --, or --link); supplying
 # more than one is an error.  The flags -s and -i may each appear at most once.
-# The body-content flags -a/-u/-b/-r are mutually
-# exclusive (at most one across all of them) and conflict with the multipart
-# flags -f/-F; -f and -F may be repeated and combined with each other.
+# The body is supplied in one of three mutually exclusive modes: single
+# (-a/-b/-r, at most one), urlencoded (-u), or multipart (-f/-F); mixing modes
+# is an error.  Within a mode, -u may repeat to build a multi-field body (curl
+# joins the fields with '&'), and -f/-F may repeat and combine.
 #
 # Environment:
 #   HTTP_IN_HEADERS       newline-separated "Name: Value" header lines
@@ -34,7 +35,8 @@
 # Body flags (appear after the URL, in any combination):
 #   -i             include -i in saved .curl replay command (shows response headers)
 #   -a [text]      plain text body  (--data); omit text to read from stdin
-#   -u [text]      URL-encode body  (--data-urlencode); omit to read from stdin
+#   -u [text]      URL-encode body  (--data-urlencode); omit to read from stdin;
+#                  repeatable (curl joins the fields with '&')
 #   -f [name=]file multipart file upload (--form name=@file); name defaults to
 #                  the file's basename; omit file entirely for raw stdin body
 #   -F name=value  multipart text field (--form name=value); repeatable
@@ -404,12 +406,12 @@ _hal_http_usage() {
     printf '  -s <basename>  write output files under <basename> (else domain_timestamp)\n' >&2
     printf '  -i             add -i to saved .curl replay (show response headers)\n' >&2
     printf '  -a [text]      --data (ASCII text; omit to read stdin)\n'        >&2
-    printf '  -u [text]      --data-urlencode (omit to read stdin)\n'          >&2
+    printf '  -u [text]      --data-urlencode (omit to read stdin; repeatable)\n' >&2
     printf '  -f [name=]file --form name=@file (name defaults to basename; omit file for raw stdin)\n' >&2
     printf '  -F name=value  --form name=value (multipart text field; repeatable)\n' >&2
     printf '  -b [filename]  --data-binary @file (omit for stdin)\n'           >&2
     printf '  -r [filename]  --upload-file (omit for stdin)\n'                 >&2
-    printf '\n-a/-u/-b/-r are mutually exclusive and conflict with -f/-F.\n'   >&2
+    printf '\nBody modes (mutually exclusive): -a/-b/-r single, -u urlencoded, -f/-F multipart.\n' >&2
 }
 
 # ── entry point ───────────────────────────────────────────────────────────────
@@ -461,7 +463,23 @@ while [[ $# -gt 0 ]]; do
                 _link_from_stdin=1
             fi
             ;;
-        -a|-u|-b|-r)
+        -u)
+            # -u (--data-urlencode) may repeat; curl concatenates the fields
+            # into one body, joined with '&'.  Still conflicts with the other
+            # single-body flags and with multipart -f/-F.
+            [[ -z "$_seen_single" || "$_seen_single" == -u ]] || hal::log::die \
+                "conflicting body flag $_arg (already using $_seen_single)"
+            [[ "$_seen_multipart" -eq 0 ]] || hal::log::die \
+                "body flag $_arg conflicts with multipart -f/-F"
+            _seen_single="$_arg"
+            _BF_FLAG+=("$_arg")
+            if [[ $# -gt 0 ]] && ! _hal_http_is_flag "$1"; then
+                _BF_PARAM+=("$1"); _BF_HAD+=(1); shift
+            else
+                _BF_PARAM+=(''); _BF_HAD+=(0)
+            fi
+            ;;
+        -a|-b|-r)
             [[ -z "$_seen_single" ]] || hal::log::die \
                 "conflicting body flag $_arg (already using $_seen_single)"
             [[ "$_seen_multipart" -eq 0 ]] || hal::log::die \

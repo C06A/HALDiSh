@@ -464,6 +464,13 @@ MOCK
     _curl_has_seq --data-urlencode 'my query'
 }
 
+@test "httpreq: -u repeated adds each --data-urlencode field" {
+    _run_req POST 'https://example.com/' -u 'name=john' -u 'city=New York'
+    [ "$status" -eq 0 ]
+    _curl_has_seq --data-urlencode 'name=john'
+    _curl_has_seq --data-urlencode 'city=New York'
+}
+
 # ── body flag: -f ─────────────────────────────────────────────────────────────
 
 @test "httpreq: -f with filename adds --form basename=@file to curl args" {
