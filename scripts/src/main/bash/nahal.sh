@@ -191,6 +191,11 @@ _brow_pretty() {
     fi
 }
 
+# _brow_raw <json>  → the resource as held (compact JSON, no pretty-printing)
+_brow_raw() {
+    printf '%s\n' "$1"
+}
+
 # ── content-type classification ───────────────────────────────────────────────
 
 # _brow_classify_ct <content-type>  → hal | text | binary
@@ -1012,6 +1017,7 @@ _brow_navigate_resource() {
         [[ "$has_props"    == "true" ]] && opts+=("properties")
         [[ "$has_docs"     == "true" ]] && opts+=("docs")
         opts+=("${_BROW_NAV}print resource")
+        opts+=("${_BROW_NAV}print resource (raw)")
         if [[ "$is_top" == "1" ]]; then
             opts+=("${_BROW_NAV}quit")
         else
@@ -1028,6 +1034,7 @@ _brow_navigate_resource() {
             properties)      _brow_nav_properties "$json" ;;
             docs)            _brow_nav_docs       "$json" "$src_base" ;;
             "print resource") _brow_pretty "$json" ;;
+            "print resource (raw)") _brow_raw "$json" ;;
             back)            return 0 ;;
             quit)            exit 0 ;;
         esac
@@ -1063,6 +1070,7 @@ _brow_navigate_array() {
             fi
         done
         opts+=("${_BROW_NAV}print resource")
+        opts+=("${_BROW_NAV}print resource (raw)")
         if [[ "$is_top" == "1" ]]; then
             opts+=("${_BROW_NAV}quit")
         else
@@ -1075,6 +1083,7 @@ _brow_navigate_array() {
 
         case "$chosen" in
             "print resource") _brow_pretty "$json" ;;
+            "print resource (raw)") _brow_raw "$json" ;;
             back)             return 0 ;;
             quit)             exit 0 ;;
             *)

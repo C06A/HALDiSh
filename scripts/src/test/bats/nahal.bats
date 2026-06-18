@@ -560,8 +560,8 @@ CURI_RES='{"_links":{"self":{"href":"/r"},"curies":[{"name":"ex","href":"https:/
 # ── interactive session smoke tests ───────────────────────────────────────────
 
 @test "interactive: GET a HAL resource then quit" {
-    # Resource menu (top-level): links(1) properties(2) print resource(3) quit(4)
-    _type_key '4'
+    # Resource menu (top-level): links(1) properties(2) print resource(3) print resource (raw)(4) quit(5)
+    _type_key '5'
     run --separate-stderr bash -c 'cd "$2" && bash "$1" -p step_ http://example.com/api' \
         _ "$NAHAL_SH" "$WORK_DIR"
     [ "$status" -eq 0 ]
@@ -570,13 +570,24 @@ CURI_RES='{"_links":{"self":{"href":"/r"},"curies":[{"name":"ex","href":"https:/
     [ -n "$(ls -d "${WORK_DIR}"/nahal_* 2>/dev/null)" ]
 }
 
+@test "interactive: print resource (raw) dumps the resource unformatted" {
+    # Resource menu (top-level): links(1) properties(2) print resource(3) print resource (raw)(4) quit(5)
+    _type_key '4'   # print resource (raw)
+    _type_key '5'   # quit
+    run --separate-stderr bash -c 'cd "$2" && bash "$1" -p step_ http://example.com/api' \
+        _ "$NAHAL_SH" "$WORK_DIR"
+    [ "$status" -eq 0 ]
+    # Raw output is the resource as held — the unmodified single-line body, not reflowed.
+    [[ "$output" == *'{ "_links": { "self": { "href": "/api/r" } }, "title": "Mock" }'* ]]
+}
+
 @test "interactive: navigate into links, show details, back, then quit" {
     _type_key '1'   # links
     _type_key '2'   # self           (links menu: back(1) self(2))
     _type_key '2'   # show details   (action: follow(1) details(2) back(3)) — loops
     _type_key '3'   # back           → back to links list
     _type_key '1'   # back           → back to resource
-    _type_key '4'   # quit
+    _type_key '5'   # quit           (resource: links(1) properties(2) print(3) raw(4) quit(5))
     run --separate-stderr bash -c 'cd "$2" && bash "$1" -p step_ http://example.com/api' \
         _ "$NAHAL_SH" "$WORK_DIR"
     [ "$status" -eq 0 ]
@@ -585,8 +596,8 @@ CURI_RES='{"_links":{"self":{"href":"/r"},"curies":[{"name":"ex","href":"https:/
 
 @test "interactive: GET an array of HAL resources, enter one element, then quit" {
     export MOCK_BODY='[{"_links":{"self":{"href":"/api/a"}},"n":1},{"_links":{"self":{"href":"/api/b"}},"n":2}]'
-    _type_key '1'   # element 1   (array menu: 1:/api/a(1) 2:/api/b(2) print(3) quit(4))
-    _type_key '5'   # quit        (element resource: links(1) properties(2) print(3) back(4) quit(5))
+    _type_key '1'   # element 1   (array menu: 1:/api/a(1) 2:/api/b(2) print(3) raw(4) quit(5))
+    _type_key '6'   # quit        (element resource: links(1) properties(2) print(3) raw(4) back(5) quit(6))
     run --separate-stderr bash -c 'cd "$2" && bash "$1" -p step_ http://example.com/api' \
         _ "$NAHAL_SH" "$WORK_DIR"
     [ "$status" -eq 0 ]
@@ -628,15 +639,15 @@ ROUTER
 
     # rels sort identically under jq (alphabetical) and yq (document order):
     # self, toB, toX.
-    _type_key '1'   # links               (root: links(1) print(2) quit(3))
+    _type_key '1'   # links               (root: links(1) print(2) raw(3) quit(4))
     _type_key '3'   # toB                 (links: back(1) self(2) toB(3) toX(4))
     _type_key '1'   # follow              (action: follow(1) details(2) back(3))
     _type_key '1'   # GET                 (method: GET(1) …)
-    _type_key '3'   # back                (B resource: links(1) print(2) back(3) quit(4))
+    _type_key '4'   # back                (B resource: links(1) print(2) raw(3) back(4) quit(5))
     _type_key '4'   # toX                 (root links again: back(1) self(2) toB(3) toX(4))
     _type_key '1'   # follow
     _type_key '1'   # GET
-    _type_key '4'   # quit                (followed resource: links(1) print(2) back(3) quit(4))
+    _type_key '5'   # quit                (followed resource: links(1) print(2) raw(3) back(4) quit(5))
     run --separate-stderr bash -c 'cd "$2" && bash "$1" -p req http://example.com/A' \
         _ "$NAHAL_SH" "$WORK_DIR"
     [ "$status" -eq 0 ]
@@ -654,12 +665,12 @@ ROUTER
     # _links.items is an array of two links; only that one rel so menu positions
     # are the same under jq (sorted keys) and yq (document order).
     export MOCK_BODY='{"_links":{"items":[{"href":"/a"},{"href":"/b"}]},"title":"t"}'
-    _type_key '1'   # links                 (top: links(1) properties(2) print(3) quit(4))
+    _type_key '1'   # links                 (top: links(1) properties(2) print(3) raw(4) quit(5))
     _type_key '2'   # items                 (links: back(1) items(2))
     _type_key '3'   # element 1 → /b        (choose link: back(1) 0:/a(2) 1:/b(3))
     _type_key '1'   # follow (send request) (action: follow(1) details(2) back(3))
     _type_key '1'   # GET                   (HTTP method menu: GET(1) …)
-    _type_key '5'   # quit                  (followed resource: links(1) properties(2) print(3) back(4) quit(5))
+    _type_key '6'   # quit                  (followed resource: links(1) properties(2) print(3) raw(4) back(5) quit(6))
     run --separate-stderr bash -c 'cd "$2" && bash "$1" -p step_ http://example.com/api' \
         _ "$NAHAL_SH" "$WORK_DIR"
     [ "$status" -eq 0 ]
@@ -675,11 +686,11 @@ ROUTER
     # whether jq (sorted) or yq (document order) lists the keys.
     export MOCK_BODY='{"_links":{"self":{"href":"/api/r"},"curies":[{"name":"ex","href":"https://ex.com/docs/{rel}","templated":true}],"ex:widget":{"href":"/w"}},"title":"t"}'
     export OPEN_LOG="${WORK_DIR}/opened"
-    # Resource menu: links(1) properties(2) docs(3) print(4) quit(5)
+    # Resource menu: links(1) properties(2) docs(3) print(4) raw(5) quit(6)
     _type_key '3'   # docs
     _type_key '2'   # ex:widget   (docs menu: back(1) ex:widget(2))
     _type_key '1'   # back
-    _type_key '5'   # quit
+    _type_key '6'   # quit
     run --separate-stderr bash -c 'cd "$2" && bash "$1" -p step_ http://example.com/api' \
         _ "$NAHAL_SH" "$WORK_DIR"
     [ "$status" -eq 0 ]
@@ -703,7 +714,7 @@ PLUG
     _type_key '3'   # docs
     _type_key '2'   # ex:widget
     _type_key '1'   # back
-    _type_key '5'   # quit
+    _type_key '6'   # quit
     run --separate-stderr bash -c 'cd "$2" && bash "$1" -p step_ http://example.com/api' \
         _ "$NAHAL_SH" "$WORK_DIR"
     [ "$status" -eq 0 ]
@@ -713,8 +724,8 @@ PLUG
 
 @test "interactive: docs option is absent when no rel uses a curie prefix" {
     export MOCK_BODY='{"_links":{"self":{"href":"/api/r"},"curies":[{"name":"ex","href":"https://ex.com/docs/{rel}"}]},"title":"t"}'
-    _type_key '3'   # links(1) properties(2) print(3) quit(4) — no docs; 3 = print
-    _type_key '4'   # quit
+    _type_key '3'   # links(1) properties(2) print(3) raw(4) quit(5) — no docs; 3 = print
+    _type_key '5'   # quit
     run --separate-stderr bash -c 'cd "$2" && bash "$1" -p step_ http://example.com/api' \
         _ "$NAHAL_SH" "$WORK_DIR"
     [ "$status" -eq 0 ]
@@ -724,14 +735,14 @@ PLUG
 # ── links menu: curies display mode (-c / NAHAL_CURIES) ───────────────────────
 
 # Resource with two curie prefixes (c1, c2): order is defined under both, report
-# only under c1.  Resource menu: links(1) properties(2) docs(3) print(4) quit(5).
+# only under c1.  Resource menu: links(1) properties(2) docs(3) print(4) raw(5) quit(6).
 CURIE_LINKS_BODY='{"_links":{"self":{"href":"/api/r"},"curies":[{"name":"c1","href":"https://d/{rel}","templated":true},{"name":"c2","href":"https://d2/{rel}","templated":true}],"c1:order":{"href":"/o1"},"c2:order":{"href":"/o2"},"c1:report":{"href":"/rp"}},"title":"t"}'
 
 @test "links menu (default/without curies): shows local names, groups duplicates, hides curies" {
     export MOCK_BODY="$CURIE_LINKS_BODY"
     _type_key '1'   # links
     _type_key '1'   # back
-    _type_key '5'   # quit
+    _type_key '6'   # quit
     run --separate-stderr bash -c 'cd "$2" && bash "$1" -p step_ http://example.com/api' \
         _ "$NAHAL_SH" "$WORK_DIR"
     [ "$status" -eq 0 ]
@@ -745,7 +756,7 @@ CURIE_LINKS_BODY='{"_links":{"self":{"href":"/api/r"},"curies":[{"name":"c1","hr
     export MOCK_BODY="$CURIE_LINKS_BODY"
     _type_key '1'   # links
     _type_key '1'   # back
-    _type_key '5'   # quit
+    _type_key '6'   # quit
     run --separate-stderr bash -c 'cd "$2" && bash "$1" -c on -p step_ http://example.com/api' \
         _ "$NAHAL_SH" "$WORK_DIR"
     [ "$status" -eq 0 ]
@@ -757,7 +768,7 @@ CURIE_LINKS_BODY='{"_links":{"self":{"href":"/api/r"},"curies":[{"name":"c1","hr
 
 @test "links menu: -c overrides NAHAL_CURIES" {
     export MOCK_BODY="$CURIE_LINKS_BODY"
-    _type_key '1'; _type_key '1'; _type_key '5'
+    _type_key '1'; _type_key '1'; _type_key '6'
     run --separate-stderr bash -c 'cd "$2" && NAHAL_CURIES=off bash "$1" -c on -p step_ http://example.com/api' \
         _ "$NAHAL_SH" "$WORK_DIR"
     [ "$status" -eq 0 ]
@@ -772,7 +783,7 @@ CURIE_LINKS_BODY='{"_links":{"self":{"href":"/api/r"},"curies":[{"name":"c1","hr
     _type_key '2'   # c1:item
     _type_key '1'   # follow (send request)
     _type_key '1'   # GET (HTTP method menu)
-    _type_key '6'   # quit (followed resource has docs: links(1) props(2) docs(3) print(4) back(5) quit(6))
+    _type_key '7'   # quit (followed resource has docs: links(1) props(2) docs(3) print(4) raw(5) back(6) quit(7))
     run --separate-stderr bash -c 'cd "$2" && bash "$1" -p step_ http://example.com/api' \
         _ "$NAHAL_SH" "$WORK_DIR"
     [ "$status" -eq 0 ]
@@ -788,7 +799,7 @@ CURIE_LINKS_BODY='{"_links":{"self":{"href":"/api/r"},"curies":[{"name":"c1","hr
     _type_key '2'   # only    → single match, no disambiguation → action menu
     _type_key '1'   # follow
     _type_key '1'   # GET (HTTP method menu)
-    _type_key '6'   # quit (followed resource has docs: links(1) props(2) docs(3) print(4) back(5) quit(6))
+    _type_key '7'   # quit (followed resource has docs: links(1) props(2) docs(3) print(4) raw(5) back(6) quit(7))
     run --separate-stderr bash -c 'cd "$2" && bash "$1" -p step_ http://example.com/api' \
         _ "$NAHAL_SH" "$WORK_DIR"
     [ "$status" -eq 0 ]
@@ -812,9 +823,10 @@ CURIE_LINKS_BODY='{"_links":{"self":{"href":"/api/r"},"curies":[{"name":"c1","hr
 # ── session.sh replay generation ──────────────────────────────────────────────
 
 # Drive a fixed session (GET root → follow self → quit) and echo the session dir.
-# Keys: links(1) self(2) follow(1) GET(1) quit(5)
+# Keys: links(1) self(2) follow(1) GET(1) quit(6)
+# (followed resource menu: links(1) properties(2) print(3) raw(4) back(5) quit(6))
 _run_self_follow_session() {
-    _type_key '1'; _type_key '2'; _type_key '1'; _type_key '1'; _type_key '5'
+    _type_key '1'; _type_key '2'; _type_key '1'; _type_key '1'; _type_key '6'
     run bash -c 'cd "$2" && bash "$1" -p step_ http://example.com/api' _ "$NAHAL_SH" "$WORK_DIR"
     [ "$status" -eq 0 ]
     SESSION_DIR=$(ls -d "${WORK_DIR}"/nahal_* | head -1)
@@ -1027,7 +1039,7 @@ _make_pass_plugin() {
     _type_line 'hello'    # the value for term
     _type_key  '1'        # Continue
     _type_key  '1'        # GET
-    _type_key  '5'        # quit (followed resource menu)
+    _type_key  '6'        # quit (followed resource: links(1) properties(2) print(3) raw(4) back(5) quit(6))
     run --separate-stderr bash -c 'cd "$2" && bash "$1" -p req http://example.com/api' \
         _ "$NAHAL_SH" "$WORK_DIR"
     [ "$status" -eq 0 ]
@@ -1043,7 +1055,7 @@ _make_pass_plugin() {
     _type_key '1'   # follow   (action: follow(1) details(2) back(3))
     _type_key '2'   # POST     (method: GET(1) POST(2) … HEAD(7) Other(8))
     _type_key '1'   # No body  (body: No body(1) …)
-    _type_key '5'   # quit     (followed resource: links(1) properties(2) print(3) back(4) quit(5))
+    _type_key '6'   # quit     (followed resource: links(1) properties(2) print(3) raw(4) back(5) quit(6))
     run --separate-stderr bash -c 'cd "$2" && bash "$1" -p step_ http://example.com/api' \
         _ "$NAHAL_SH" "$WORK_DIR"
     [ "$status" -eq 0 ]
