@@ -971,6 +971,42 @@ _make_pass_plugin() {
     [[ "$stderr" == *"${fresh} new at replay"* ]]          # INFO — added
 }
 
+@test "session.sh replay: restores HAL_LINK_PLUGIN when unset and all plugins available" {
+    local pass; pass=$(_make_pass_plugin pass.sh)
+    export HAL_LINK_PLUGIN="$pass"                 # list at session creation
+    _run_self_follow_session
+    # Replay with HAL_LINK_PLUGIN entirely unset: it is restored, then the diff
+    # sees the restored entry as present in both (OK), not new and not missing.
+    run --separate-stderr env -u HAL_LINK_PLUGIN bash "${SESSION_DIR}/session.sh"
+    [ "$status" -eq 0 ]
+    [[ "$stderr" == *"restored HAL_LINK_PLUGIN from session"* ]]
+    [[ "$stderr" == *"${pass}"* ]]
+    [[ "$stderr" != *"new at replay"* ]]
+    [[ "$stderr" != *"missing at replay"* ]]
+}
+
+@test "session.sh replay: does not restore HAL_LINK_PLUGIN when a recorded plugin is missing" {
+    local gone; gone=$(_make_pass_plugin gone.sh)
+    export HAL_LINK_PLUGIN="$gone"                 # list at session creation
+    _run_self_follow_session
+    rm -f "$gone"                                  # plugin no longer available
+    run --separate-stderr env -u HAL_LINK_PLUGIN bash "${SESSION_DIR}/session.sh"
+    [ "$status" -eq 0 ]
+    [[ "$stderr" == *"not restoring HAL_LINK_PLUGIN"* ]]
+    [[ "$stderr" == *"recorded plugin ${gone} is missing"* ]]
+    [[ "$stderr" != *"restored HAL_LINK_PLUGIN from session"* ]]
+}
+
+@test "session.sh replay: does not restore when HAL_LINK_PLUGIN is set (even to empty)" {
+    local pass; pass=$(_make_pass_plugin pass.sh)
+    export HAL_LINK_PLUGIN="$pass"                 # list at session creation
+    _run_self_follow_session
+    # Explicitly set-but-empty at replay: the user's choice wins, no restore.
+    HAL_LINK_PLUGIN="" run --separate-stderr bash "${SESSION_DIR}/session.sh"
+    [ "$status" -eq 0 ]
+    [[ "$stderr" != *"restored HAL_LINK_PLUGIN from session"* ]]
+}
+
 @test "live session: response files are renamed to predictable step names" {
     _run_self_follow_session
     [ -f "${SESSION_DIR}/step_1.body" ]

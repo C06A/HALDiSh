@@ -1705,6 +1705,28 @@ _NAHAL_BOOTSTRAP
     printf '\n_plugins_created=%q\n' "${HAL_LINK_PLUGIN:-}"
     cat <<'_NAHAL_PLUGIN_CHECK'
 
+# Plugin auto-restore: if HAL_LINK_PLUGIN is not set at all (not even to an empty
+# value) and every plugin recorded at session creation is still available, restore
+# the recorded list so the replay runs with the same plugins.  If the variable is
+# set (even to empty) or any recorded plugin is missing, leave it untouched and
+# fall through to the diff below (current behavior).
+_restore_plugins() {
+    [ -n "${HAL_LINK_PLUGIN+x}" ] && return 0   # already set (even empty): leave as-is
+    [ -n "$_plugins_created" ]    || return 0   # nothing recorded to restore
+    local -a _was=(); local _p
+    IFS=: read -ra _was <<< "$_plugins_created"
+    for _p in "${_was[@]+"${_was[@]}"}"; do
+        [ -z "$_p" ] && continue
+        command -v "$_p" >/dev/null 2>&1 || {
+            hal::log::warn "not restoring HAL_LINK_PLUGIN: recorded plugin $_p is missing"
+            return 0
+        }
+    done
+    export HAL_LINK_PLUGIN="$_plugins_created"
+    hal::log::info "restored HAL_LINK_PLUGIN from session: $_plugins_created"
+}
+_restore_plugins
+
 # Plugin list check: compare HAL_LINK_PLUGIN at replay against the list recorded
 # when this session was created.  OK = present in both, INFO = new at replay,
 # WARN = recorded plugin missing at replay.
