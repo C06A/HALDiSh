@@ -995,8 +995,16 @@ _brow_navigate_resource() {
     has_docs="false"
     [[ "$has_links" == "true" && -n "$(_brow_curi_rels "$json")" ]] && has_docs="true"
 
+    # The response base this resource was loaded from (empty for a resource that
+    # was parsed from a file/text start rather than fetched into a numbered base).
+    local _base="${_BROW_STEP_BASE[$src_base]:-}"
+
     while true; do
-        printf '\n[ %s ]\n' "$url" >&2
+        if [[ -n "$_base" ]]; then
+            printf '\n[ URL: %s | basename: %s ]\n' "$url" "$_base" >&2
+        else
+            printf '\n[ URL: %s ]\n' "$url" >&2
+        fi
 
         local opts=()
         [[ "$has_links"    == "true" ]] && opts+=("links")
@@ -1034,9 +1042,14 @@ _brow_navigate_array() {
     local json="$1" url="$2" is_top="$3" src_base="$4"
     local count
     count=$(_brow_qr "$json" 'length')
+    local _base="${_BROW_STEP_BASE[$src_base]:-}"
 
     while true; do
-        printf '\n[ %s ] (array of %s)\n' "$url" "$count" >&2
+        if [[ -n "$_base" ]]; then
+            printf '\n[ URL: %s | basename: %s ] (array of %s)\n' "$url" "$_base" "$count" >&2
+        else
+            printf '\n[ URL: %s ] (array of %s)\n' "$url" "$count" >&2
+        fi
 
         local opts=() i
         for (( i = 0; i < count; i++ )); do
