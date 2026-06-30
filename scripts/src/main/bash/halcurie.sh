@@ -8,15 +8,16 @@
 #   stdout — the link object JSON with .href expanded (unchanged when it is not a
 #            resolvable CURIE)
 #
-# A href "looks like a CURIE" when it is <prefix>:<reference> with an NCName
-# <prefix> (e.g. "doc:orders").  The prefix is resolved against the FIRST link in
-# a "_links.CURIE" collection whose "name" equals the prefix, searched from the
-# resource holding the link upward through the embedded stack to the root.  The
-# CURIE link's href is a plain URL (no "{rel}" template); expansion replaces the
-# "<prefix>:" portion of the original href with that URL.
-#
-# Because a URL scheme also parses as <prefix>:… (e.g. "http://host/…"), an href
-# whose scheme has no matching CURIE definition is simply left unchanged.
+# Only a SafeCURIE href is expanded — a CURIE wrapped in square brackets,
+# "[<prefix>:<reference>]" with an NCName <prefix> (e.g. "[doc:orders]").  The
+# brackets are the W3C SafeCURIE marker that disambiguates a CURIE from a URI that
+# merely shares the "<prefix>:…" shape (e.g. "http://host/…"), so a bare,
+# unbracketed href is always left unchanged.  The prefix is resolved against the
+# FIRST link in a "_links.CURIE" collection whose "name" equals the prefix,
+# searched from the resource holding the link upward through the embedded stack to
+# the root.  The CURIE link's href is a plain URL (no "{rel}" template); expansion
+# replaces the whole "[<prefix>:<reference>]" with that URL followed by the
+# reference (the brackets are dropped).
 #
 # The upward search is done by re-querying the root file with hal.sh, altering
 # the path rather than loading sub-resources into memory: the trailing
@@ -81,12 +82,14 @@ if ! _href=$(_hc_get_href "$_link_json"); then
     printf 'halcurie: invalid link JSON on stdin\n' >&2; exit 5
 fi
 
-# Not a CURIE-looking href → pass through unchanged.
-if [[ -z "$_href" || "$_href" == null || "$_href" != *:* ]]; then
+# Not a SafeCURIE href ("[<prefix>:<reference>]") → pass through unchanged.  A bare
+# "<prefix>:<reference>" is ambiguous with a URI and is intentionally left as-is.
+if [[ -z "$_href" || "$_href" == null || "$_href" != \[*:*\] ]]; then
     printf '%s' "$_link_json"; exit 0
 fi
-_prefix="${_href%%:*}"
-_reference="${_href#*:}"
+_curie="${_href#\[}"; _curie="${_curie%\]}"   # strip the SafeCURIE brackets
+_prefix="${_curie%%:*}"
+_reference="${_curie#*:}"
 if [[ ! "$_prefix" =~ ^[A-Za-z_][A-Za-z0-9._-]*$ ]]; then
     printf '%s' "$_link_json"; exit 0
 fi
