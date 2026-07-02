@@ -1608,6 +1608,39 @@ _brow_resolve_start() {
     fi
 }
 
+# _brow_emit_plugin_env
+# Emits (to the session log) the recorded plugin environment: the entry-time
+# "was the plugin list set" flag, the ordered plugin-name array, and each
+# plugin's `-config` snippet (%q-encoded).  A replay uses these to restore the
+# env (plugin list unset) or diff against it (list set) — see _check_plugin_env
+# in the emitted bootstrap.
+_brow_emit_plugin_env() {
+    # Capture, before _restore_plugins can change it at replay, whether the
+    # caller set the plugin list — this gates the env restore in _check_plugin_env.
+    printf '_hal_plugins_set_at_entry=0\n'
+    printf '[ -n "${HAL_LINK_PLUGIN+x}" ] && _hal_plugins_set_at_entry=1\n'
+
+    local -a _plugins=()
+    [[ -n "${HAL_LINK_PLUGIN:-}" ]] && IFS=: read -ra _plugins <<< "$HAL_LINK_PLUGIN"
+
+    local _p
+    printf '_plugin_cfg_names=('
+    for _p in "${_plugins[@]+"${_plugins[@]}"}"; do
+        [[ -z "$_p" ]] && continue
+        printf ' %q' "$_p"
+    done
+    printf ' )\n'
+
+    local _i=0 _cfg
+    for _p in "${_plugins[@]+"${_plugins[@]}"}"; do
+        [[ -z "$_p" ]] && continue
+        _cfg=''
+        command -v "$_p" >/dev/null 2>&1 && _cfg="$("$_p" -config 2>/dev/null || true)"
+        printf '_plugin_cfg_%d=%q\n' "$_i" "$_cfg"
+        _i=$((_i + 1))
+    done
+}
+
 # ── main ──────────────────────────────────────────────────────────────────────
 # Guard so the file can be sourced (e.g. by the test suite) to exercise the
 # helper functions in isolation without launching an interactive session.
@@ -1724,6 +1757,9 @@ _NAHAL_BOOTSTRAP
     # a check that diffs it against the list present at replay time.  hal::log::*
     # is already loaded by the bootstrap above.
     printf '\n_plugins_created=%q\n' "${HAL_LINK_PLUGIN:-}"
+    # Record each configured plugin's environment (via its `-config` output) plus
+    # the entry-time plugin-list flag, so the replay can restore or diff the env.
+    _brow_emit_plugin_env
     cat <<'_NAHAL_PLUGIN_CHECK'
 
 # Plugin auto-restore: if HAL_LINK_PLUGIN is not set at all (not even to an empty
@@ -1770,6 +1806,34 @@ _check_plugins() {
     done
 }
 _check_plugins
+
+# Plugin env check/restore: the recorded plugin-name array (_plugin_cfg_names)
+# and per-plugin `-config` snippets (_plugin_cfg_<i>) were written above, and
+# _hal_plugins_set_at_entry captured whether the caller set HAL_LINK_PLUGIN
+# before _restore_plugins ran.  When the plugin list was unset at replay entry
+# the session owns the environment, so each recorded snippet is eval'd to restore
+# it; when the list was set the caller drives the environment, so each plugin's
+# current `-config` is only diffed against the recorded snippet and reported.
+_check_plugin_env() {
+    local _i _p _v _rec _now
+    for _i in "${!_plugin_cfg_names[@]}"; do
+        _p="${_plugin_cfg_names[$_i]}"
+        _v="_plugin_cfg_${_i}"
+        _rec="${!_v-}"
+        if [ "${_hal_plugins_set_at_entry:-0}" -eq 0 ]; then
+            [ -n "$_rec" ] && { eval "$_rec"; hal::log::info "restored env for plugin $_p"; }
+            continue
+        fi
+        command -v "$_p" >/dev/null 2>&1 || continue
+        _now="$("$_p" -config 2>/dev/null || true)"
+        if [ "$_now" = "$_rec" ]; then
+            hal::log::ok   "plugin $_p env matches"
+        else
+            hal::log::warn "plugin $_p env differs from recorded"
+        fi
+    done
+}
+_check_plugin_env
 _NAHAL_PLUGIN_CHECK
 } > "$_BROW_LOG"
 chmod +x "$_BROW_LOG"

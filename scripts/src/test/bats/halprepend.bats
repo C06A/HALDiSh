@@ -129,3 +129,33 @@ teardown() {
     [ "$status" -eq 0 ]
     [[ "$output" == *'https://example.com/api/items'* ]]
 }
+
+# ── -config: env-recreation snippet (plugin contract) ────────────────────────
+
+@test "halprepend.sh -config prints an export line when HAL_PREPEND_BASE is set" {
+    run env HAL_PREPEND_BASE='https://example.com' bash "$HALPREPEND_SH" -config
+    [ "$status" -eq 0 ]
+    [ "$output" = 'export HAL_PREPEND_BASE=https://example.com' ]
+}
+
+@test "halprepend.sh -config prints nothing when HAL_PREPEND_BASE is unset" {
+    run env -u HAL_PREPEND_BASE bash "$HALPREPEND_SH" -config
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+}
+
+@test "halprepend.sh -config output round-trips through eval (special chars)" {
+    local base='https://example.com/a b?c=1&d=2'
+    local snip; snip=$(env HAL_PREPEND_BASE="$base" bash "$HALPREPEND_SH" -config)
+    run env -u HAL_PREPEND_BASE bash -c 'eval "$1"; printf "%s" "$HAL_PREPEND_BASE"' _ "$snip"
+    [ "$status" -eq 0 ]
+    [ "$output" = "$base" ]
+}
+
+@test "halprepend.sh -config does not read stdin and does no expansion" {
+    # A link on stdin must be ignored: -config exits before reading it.
+    run env HAL_PREPEND_BASE='https://example.com' bash "$HALPREPEND_SH" -config <<< '{"href":"/x"}'
+    [ "$status" -eq 0 ]
+    [[ "$output" != *'"href"'* ]]
+    [ "$output" = 'export HAL_PREPEND_BASE=https://example.com' ]
+}

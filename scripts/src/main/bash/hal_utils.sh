@@ -248,3 +248,24 @@ _hal_run_plugins() {
     fi
     printf '%s' "$_current"
 }
+
+# hal::plugin::config
+# Prints the aggregate plugin-environment snippet for the plugins in
+# HAL_LINK_PLUGIN.  Each plugin is queried with '-config' (the plugin contract:
+# print shell that recreates its environment from the current values, no stdin
+# read) and its output is framed by a marker line so a caller can record or diff
+# the per-plugin blocks.  A plugin not on PATH is skipped (its absence is already
+# surfaced by the session plugin-list check).  No-op when HAL_LINK_PLUGIN is
+# unset or empty.
+hal::plugin::config() {
+    [[ -n "${HAL_LINK_PLUGIN:-}" ]] || return 0
+    local -a _plugins
+    IFS=: read -ra _plugins <<< "$HAL_LINK_PLUGIN"
+    local _p
+    for _p in "${_plugins[@]}"; do
+        [[ -z "$_p" ]] && continue
+        command -v "$_p" >/dev/null 2>&1 || continue
+        printf '# --8<-- plugin: %s\n' "$_p"
+        "$_p" -config
+    done
+}

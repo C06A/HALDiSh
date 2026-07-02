@@ -183,3 +183,18 @@ teardown() {
     [ "$status" -eq 0 ]
     [[ "$output" == *'"href":"https://api.example.com/orders/widget"'* ]]
 }
+
+# ── -config: env-recreation snippet (plugin contract) ────────────────────────
+
+@test "halcurie.sh -config prints nothing and exits 0 (needs no environment)" {
+    run bash "$HALCURIE_SH" -config
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+}
+
+@test "halcurie.sh -config does not read stdin" {
+    # A link on stdin must be ignored: -config exits before reading it.
+    run bash "$HALCURIE_SH" -config <<< '{"href":"[ord:widget]"}'
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+}

@@ -8,6 +8,10 @@
 #   stdout — the link object JSON with .href expanded (unchanged when it is not a
 #            resolvable CURIE)
 #
+# With '-config' as the first argument, prints the shell snippet that recreates
+# this plugin's environment and exits 0 without reading stdin.  halcurie needs no
+# environment, so it emits nothing.
+#
 # Only a SafeCURIE href is expanded — a CURIE wrapped in square brackets,
 # "[<prefix>:<reference>]" with an NCName <prefix> (e.g. "[doc:orders]").  The
 # brackets are the W3C SafeCURIE marker that disambiguates a CURIE from a URI that
@@ -66,6 +70,13 @@ _hc_set_href() {
 }
 
 # ── main ──────────────────────────────────────────────────────────────────────
+
+# Plugin-contract '-config' hook: this plugin needs no environment, so it emits
+# nothing and exits without reading stdin.  (nahal.sh records each plugin's
+# `-config` output so a session replay can recreate the environment.)
+if [[ "${1:-}" == -config ]]; then
+    exit 0
+fi
 
 _link_json=$(cat)
 

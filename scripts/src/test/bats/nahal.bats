@@ -1019,6 +1019,85 @@ _make_pass_plugin() {
     [[ "$stderr" != *"restored HAL_LINK_PLUGIN from session"* ]]
 }
 
+# ── plugin environment: -config recording, restore, and diff at replay ────────
+
+# A pass-through plugin that also implements the `-config` contract: `-config`
+# prints an `export NAHAL_TEST_ENV=<current value>` snippet (mirroring
+# halprepend.sh), while the normal link path records the value of NAHAL_TEST_ENV
+# in effect to marker.out (so a test can observe what the replay had set) and
+# passes the link JSON through unchanged.
+_make_config_plugin() {
+    local p="${WORK_DIR}/$1"
+    cat > "$p" <<PLUGIN
+#!/usr/bin/env bash
+if [ "\${1:-}" = -config ]; then
+    [ -n "\${NAHAL_TEST_ENV:-}" ] && printf 'export NAHAL_TEST_ENV=%q\n' "\$NAHAL_TEST_ENV"
+    exit 0
+fi
+printf '%s\n' "\${NAHAL_TEST_ENV-<unset>}" >> "${WORK_DIR}/marker.out"
+cat
+PLUGIN
+    chmod +x "$p"
+    printf '%s' "$p"
+}
+
+@test "session.sh: records each plugin's -config env and emits _check_plugin_env" {
+    local cfg; cfg=$(_make_config_plugin cfg.sh)
+    export HAL_LINK_PLUGIN="$cfg"
+    export NAHAL_TEST_ENV='orig-value'
+    _run_self_follow_session
+    local s="${SESSION_DIR}/session.sh"
+    grep -qF '_plugin_cfg_names=('  "$s"           # ordered plugin-name array
+    grep -qF '_plugin_cfg_0='       "$s"           # per-plugin recorded snippet
+    grep -qF 'NAHAL_TEST_ENV=orig-value' "$s"      # the recorded env value
+    grep -qF '_hal_plugins_set_at_entry' "$s"      # entry-time list flag captured
+    grep -qF '_check_plugin_env()'  "$s"           # env check defined
+    grep -qE '^_check_plugin_env$'  "$s"           # and invoked on replay
+}
+
+@test "session.sh replay: restores plugin env when HAL_LINK_PLUGIN is unset" {
+    local cfg; cfg=$(_make_config_plugin cfg.sh)
+    export HAL_LINK_PLUGIN="$cfg"
+    export NAHAL_TEST_ENV='restored-me'
+    _run_self_follow_session
+    rm -f "${WORK_DIR}/marker.out"                 # drop the creation-time record
+    # Replay with both the list and the plugin's env entirely unset: the session
+    # owns the environment, so the recorded snippet is eval'd back into place.
+    run --separate-stderr env -u HAL_LINK_PLUGIN -u NAHAL_TEST_ENV \
+        bash "${SESSION_DIR}/session.sh"
+    [ "$status" -eq 0 ]
+    [[ "$stderr" == *"restored env for plugin ${cfg}"* ]]
+    # The self-follow step ran the plugin after the restore → it saw the value.
+    [[ "$(cat "${WORK_DIR}/marker.out")" == *'restored-me'* ]]
+}
+
+@test "session.sh replay: env matches logs OK when the list is set and value agrees" {
+    local cfg; cfg=$(_make_config_plugin cfg.sh)
+    export HAL_LINK_PLUGIN="$cfg"
+    export NAHAL_TEST_ENV='same-value'
+    _run_self_follow_session
+    run --separate-stderr env HAL_LINK_PLUGIN="$cfg" NAHAL_TEST_ENV='same-value' \
+        bash "${SESSION_DIR}/session.sh"
+    [ "$status" -eq 0 ]
+    [[ "$stderr" == *"plugin ${cfg} env matches"* ]]
+}
+
+@test "session.sh replay: env differs logs WARN and does not overwrite the caller's value" {
+    local cfg; cfg=$(_make_config_plugin cfg.sh)
+    export HAL_LINK_PLUGIN="$cfg"
+    export NAHAL_TEST_ENV='recorded-value'
+    _run_self_follow_session
+    rm -f "${WORK_DIR}/marker.out"
+    # Replay with the list set but a different env value: compare-only, no restore.
+    run --separate-stderr env HAL_LINK_PLUGIN="$cfg" NAHAL_TEST_ENV='caller-value' \
+        bash "${SESSION_DIR}/session.sh"
+    [ "$status" -eq 0 ]
+    [[ "$stderr" == *"plugin ${cfg} env differs from recorded"* ]]
+    # The caller's value was left untouched (not overwritten by the recorded one).
+    [[ "$(cat "${WORK_DIR}/marker.out")" == *'caller-value'* ]]
+    [[ "$(cat "${WORK_DIR}/marker.out")" != *'recorded-value'* ]]
+}
+
 @test "live session: response files are renamed to predictable step names" {
     _run_self_follow_session
     [ -f "${SESSION_DIR}/step_1.body" ]

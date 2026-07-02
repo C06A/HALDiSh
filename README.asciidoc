@@ -503,6 +503,16 @@ Each plugin reads link JSON on stdin and writes the (possibly modified) link
 JSON to stdout.  Plugins are invoked in order; the output of one becomes the
 input to the next.
 
+A plugin may also need extra environment to work — for example `halprepend.sh`
+reads `HAL_PREPEND_BASE`.  To let a recorded session recreate that environment,
+every plugin honors `-config` as its first argument: it prints a shell snippet
+that recreates its environment from the values currently in effect (for
+`halprepend.sh`, an `export HAL_PREPEND_BASE=…` line; a plugin that needs no
+environment, like `halcurie.sh`, prints nothing) and exits without reading
+stdin or expanding a link.  `nahal.sh` records each plugin's `-config` output at
+session creation so the replay can restore or verify it (see
+<<_session_replay,Session replay>>).
+
 === Session replay
 
 `session.sh` reproduces the session without `nahal.sh`: each step numbers its
@@ -555,6 +565,18 @@ automatically: it uses the toolkit if already on `PATH`, otherwise sources
 `env.sh` from `$HAL_LIB_DIR` or the default install location
 (`~/.local/lib/haldish`); if neither is found it prints installation
 instructions and exits.
+
+The replay also restores or verifies the link-plugin environment.  Alongside the
+recorded `HAL_LINK_PLUGIN` list (checked plugin-by-plugin: OK in both, INFO new,
+WARN missing), `session.sh` records each plugin's `-config` snapshot and whether
+the caller had `HAL_LINK_PLUGIN` set when the replay started.  When the plugin
+list was **unset** at replay entry, the session owns the environment, so each
+recorded snippet is evaluated to restore it (e.g. re-exporting
+`HAL_PREPEND_BASE`), reported as INFO.  When the list was **set**, the caller is
+driving the environment, so the replay only compares each plugin's current
+`-config` against the recorded one and reports OK (matches) or WARN (differs)
+without overwriting anything.  This surfaces a forgotten `HAL_PREPEND_BASE` that
+would otherwise leave hrefs relative and requests unsendable.
 
 === Examples
 

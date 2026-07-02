@@ -10,10 +10,21 @@
 # to stdout.  HAL_PREPEND_BASE unset or empty: passes link through unchanged.
 # Positional args ([resource-file] [path…]) are accepted and ignored.
 #
+# With '-config' as the first argument, prints a shell snippet that recreates
+# this plugin's environment from the current value (an `export HAL_PREPEND_BASE`
+# line when set, nothing when unset) and exits 0 without reading stdin.  This is
+# the plugin-contract hook nahal.sh records so a session replay can restore the
+# environment.
+#
 # Exit codes:
 #   0  success
 #   4  required tool not available (jq or yq)
 set -euo pipefail
+
+if [[ "${1:-}" == -config ]]; then
+    [[ -n "${HAL_PREPEND_BASE:-}" ]] && printf 'export HAL_PREPEND_BASE=%q\n' "$HAL_PREPEND_BASE"
+    exit 0
+fi
 
 _link=$(cat)
 
