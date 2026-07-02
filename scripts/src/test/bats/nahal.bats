@@ -834,9 +834,12 @@ _run_self_follow_session() {
 @test "session.sh: replay numbers _b[] via hal_basename.sh and names files via rename.sh" {
     _run_self_follow_session
     local s="${SESSION_DIR}/session.sh"
+    local p="${SESSION_DIR}/session_prelude.sh"
     [ -f "$s" ]
-    grep -qF '_ensure_method()' "$s"            # custom-method helper in header
-    grep -qF '_b=()' "$s"                        # response-base array initialised
+    [ -f "$p" ]                                  # companion prelude written
+    grep -qF 'source "$(dirname "$0")/session_prelude.sh"' "$s"  # and sourced
+    grep -qF '_ensure_method()' "$p"            # custom-method helper in the prelude
+    grep -qF '_b=()' "$p"                        # response-base array initialised
     grep -qF '_b[1]=$(' "$s"                     # initial captured as _b[1]
     grep -qF 'HTTP_IN_HEADERS="Accept:' "$s"     # Accept set on the initial bare-URL GET
     # Accept is set once, only on the initial bare-URL GET; the --link follow
@@ -926,13 +929,13 @@ _run_self_follow_session() {
     [[ "$output" == *"usage:"* ]]
 }
 
-@test "session.sh: header contains the HALDiSh bootstrap" {
+@test "session_prelude.sh contains the HALDiSh bootstrap" {
     _run_self_follow_session
-    local s="${SESSION_DIR}/session.sh"
-    grep -qF 'HALDiSh bootstrap' "$s"
-    grep -qF 'command -v hallink.sh' "$s"
-    grep -qF '.local/lib/haldish/env.sh' "$s"           # default install location
-    grep -qF 'HALDiSh toolkit not found' "$s"           # install instructions
+    local p="${SESSION_DIR}/session_prelude.sh"
+    grep -qF 'HALDiSh bootstrap' "$p"
+    grep -qF 'command -v hallink.sh' "$p"
+    grep -qF '.local/lib/haldish/env.sh' "$p"           # default install location
+    grep -qF 'HALDiSh toolkit not found' "$p"           # install instructions
 }
 
 @test "session.sh: bootstrap prints install instructions and exits when HALDiSh is absent" {
@@ -961,10 +964,11 @@ _make_pass_plugin() {
     export HAL_LINK_PLUGIN="$pass"
     _run_self_follow_session
     local s="${SESSION_DIR}/session.sh"
-    grep -qF '. hal_utils.sh' "$s"                 # library sourced for hal::log::*
-    grep -qF '_check_plugins()' "$s"               # check function defined
+    local p="${SESSION_DIR}/session_prelude.sh"
+    grep -qF '. hal_utils.sh' "$p"                 # library sourced for hal::log::*
+    grep -qF '_check_plugins()' "$p"               # check function defined
     grep -qF "$pass" "$s"                          # creation-time list recorded
-    grep -qE '^_check_plugins$' "$s"               # and invoked on replay
+    grep -qE '^_check_plugins$' "$p"               # and invoked on replay
 }
 
 @test "session.sh replay: plugin diff logs OK / WARN / INFO" {
@@ -1047,12 +1051,13 @@ PLUGIN
     export NAHAL_TEST_ENV='orig-value'
     _run_self_follow_session
     local s="${SESSION_DIR}/session.sh"
-    grep -qF '_plugin_cfg_names=('  "$s"           # ordered plugin-name array
+    local p="${SESSION_DIR}/session_prelude.sh"
+    grep -qF '_plugin_cfg_names=('  "$s"           # ordered plugin-name array (recorded)
     grep -qF '_plugin_cfg_0='       "$s"           # per-plugin recorded snippet
     grep -qF 'NAHAL_TEST_ENV=orig-value' "$s"      # the recorded env value
-    grep -qF '_hal_plugins_set_at_entry' "$s"      # entry-time list flag captured
-    grep -qF '_check_plugin_env()'  "$s"           # env check defined
-    grep -qE '^_check_plugin_env$'  "$s"           # and invoked on replay
+    grep -qF '_hal_plugins_set_at_entry' "$p"      # entry-time list flag captured in prelude
+    grep -qF '_check_plugin_env()'  "$p"           # env check defined in prelude
+    grep -qE '^_check_plugin_env$'  "$p"           # and invoked on replay
 }
 
 @test "session.sh replay: restores plugin env when HAL_LINK_PLUGIN is unset" {

@@ -32,7 +32,11 @@
 #   hallink.sh -s "${_b[N]}" "${_b[M]}.body" <path> \
 #    | <METHOD> --link \
 #    | rename.sh "${_b[N]}"
-# where $_prefix is set once near the top of the script.
+# where $_prefix is set once near the top of the script.  session.sh keeps only the
+# recorded per-session values (_prefix, the plugin list/env) and the steps; the
+# session-independent replay machinery (argument parsing, the HALDiSh-environment
+# bootstrap, _ensure_method, the plugin checks) lives in a companion
+# <session-dir>/session_prelude.sh that session.sh sources at the top.
 # Replaying it requires the HALDiSh environment on PATH (source env.sh).
 #
 # Link plugins (HAL_LINK_PLUGIN): a colon-separated list of scripts that each
@@ -1609,17 +1613,12 @@ _brow_resolve_start() {
 }
 
 # _brow_emit_plugin_env
-# Emits (to the session log) the recorded plugin environment: the entry-time
-# "was the plugin list set" flag, the ordered plugin-name array, and each
-# plugin's `-config` snippet (%q-encoded).  A replay uses these to restore the
-# env (plugin list unset) or diff against it (list set) — see _check_plugin_env
-# in the emitted bootstrap.
+# Emits (to session.sh) the recorded plugin environment: the ordered plugin-name
+# array and each plugin's `-config` snippet (%q-encoded).  A replay uses these to
+# restore the env (plugin list unset) or diff against it (list set) — see
+# _check_plugin_env in session_prelude.sh.  The entry-time "was the plugin list
+# set" flag is captured by the prelude itself (before _restore_plugins runs).
 _brow_emit_plugin_env() {
-    # Capture, before _restore_plugins can change it at replay, whether the
-    # caller set the plugin list — this gates the env restore in _check_plugin_env.
-    printf '_hal_plugins_set_at_entry=0\n'
-    printf '[ -n "${HAL_LINK_PLUGIN+x}" ] && _hal_plugins_set_at_entry=1\n'
-
     local -a _plugins=()
     [[ -n "${HAL_LINK_PLUGIN:-}" ]] && IFS=: read -ra _plugins <<< "$HAL_LINK_PLUGIN"
 
@@ -1680,23 +1679,29 @@ _brow_resolve_start "$@"
 _BROW_OUTDIR="$(pwd)/nahal_$(date +%Y%m%dT%H%M%S)"
 mkdir -p "$_BROW_OUTDIR"
 _BROW_LOG="${_BROW_OUTDIR}/session.sh"
+_BROW_PRELUDE="${_BROW_OUTDIR}/session_prelude.sh"
 
-# Write session log header.  The replay needs the HALDiSh environment (GET/POST/…,
-# hallink.sh, rename.sh, uritemplate.sh); the emitted bootstrap activates it (or
-# explains how to install it).  _ensure_method recreates a custom-method link if
-# the session dir was moved.
-{
-    printf '#!/usr/bin/env bash\n'
-    printf '# HAL Browse session — %s\n' "$(date)"
-    printf '# Starting URL: %s\n' "$_BROW_START_URL"
-    printf '# Run from:     %s\n' "$_BROW_OUTDIR"
-    printf '# Activates the HALDiSh environment automatically (see bootstrap below).\n'
-    printf '# Override the response-file prefix: -p <prefix> (highest), else\n'
-    printf '# $HAL_FILE_PREFIX, else the value recorded at session creation.\n'
-    printf 'set -euo pipefail\n'
-    printf 'cd "$(dirname "$0")"\n'
-    printf '\n'
-    cat <<'_NAHAL_ARGS'
+# The replay is split in two so session.sh stays short and readable:
+#   session_prelude.sh — the session-independent machinery (argument parsing, the
+#                        HALDiSh environment bootstrap, the _ensure_method helper,
+#                        and the plugin list/env restore-and-diff checks).
+#   session.sh         — the human-readable header, the recorded per-session values
+#                        (_prefix, _plugins_created, _plugin_cfg_*), a `source` of
+#                        the prelude, then one block per request step.
+# session.sh sets the recorded values BEFORE sourcing the prelude; the prelude
+# consumes them.  The prelude's bootstrap activates the HALDiSh environment
+# (GET/POST/…, hallink.sh, rename.sh, uritemplate.sh) or explains how to install
+# it; _ensure_method recreates a custom-method link if the session dir was moved.
+
+# ── session_prelude.sh — the static, session-independent replay machinery ─────
+cat > "$_BROW_PRELUDE" <<'_NAHAL_PRELUDE'
+#!/usr/bin/env bash
+# HAL Browse session — replay preamble, sourced by session.sh.  Session-
+# independent machinery: argument parsing, the HALDiSh environment bootstrap,
+# the _ensure_method helper, and the plugin list/env restore-and-diff checks.
+# session.sh sets the recorded per-session values (_prefix, _plugins_created,
+# _plugin_cfg_*) before sourcing this file; the code below consumes them.
+
 # ── arguments ─────────────────────────────────────────────────────────────────
 # -p <prefix> overrides the response-file base-name prefix for this replay.
 _cli_prefix_set=0 _cli_prefix=''
@@ -1709,8 +1714,6 @@ done
 shift $(( OPTIND - 1 ))
 [ $# -gt 0 ] && { printf 'session.sh: usage: session.sh [-p <prefix>]\n' >&2; exit 2; }
 
-_NAHAL_ARGS
-    cat <<'_NAHAL_BOOTSTRAP'
 # ── HALDiSh bootstrap ─────────────────────────────────────────────────────────
 # Make the toolkit available: use it if already active, otherwise source env.sh
 # from $HAL_LIB_DIR or the default install location.  If it cannot be found,
@@ -1739,28 +1742,25 @@ EOF
 fi
 . hal_utils.sh   # ensure hal::log::* are loaded (no-op if already sourced)
 
-_NAHAL_BOOTSTRAP
-    printf '_ensure_method() {\n'
-    printf '    command -v "$1" >/dev/null 2>&1 && return 0\n'
-    printf '    [ -e "./$1" ] && return 0\n'
-    printf '    local src; src="$(dirname "$(command -v GET)")/.httpreq.sh"\n'
-    printf '    ln -f "$src" "./$1" 2>/dev/null || ln -sf "$src" "./$1"\n'
-    printf '}\n'
-    printf '\n'
-    printf '_b=()   # response base name captured per step\n'
-    # Resolve the response-file prefix: the baked value is the default; an exported
-    # HAL_FILE_PREFIX overrides it (set-but-empty is honored); -p overrides both.
-    printf '_prefix=%q   # prefix recorded at session creation (default)\n' "$_BROW_PREFIX"
-    printf '[ "${HAL_FILE_PREFIX+x}" = x ] && _prefix=$HAL_FILE_PREFIX\n'
-    printf '[ "$_cli_prefix_set" -eq 1 ]   && _prefix=$_cli_prefix\n'
-    # Record the HAL_LINK_PLUGIN list as it stood at session creation, then emit
-    # a check that diffs it against the list present at replay time.  hal::log::*
-    # is already loaded by the bootstrap above.
-    printf '\n_plugins_created=%q\n' "${HAL_LINK_PLUGIN:-}"
-    # Record each configured plugin's environment (via its `-config` output) plus
-    # the entry-time plugin-list flag, so the replay can restore or diff the env.
-    _brow_emit_plugin_env
-    cat <<'_NAHAL_PLUGIN_CHECK'
+_ensure_method() {
+    command -v "$1" >/dev/null 2>&1 && return 0
+    [ -e "./$1" ] && return 0
+    local src; src="$(dirname "$(command -v GET)")/.httpreq.sh"
+    ln -f "$src" "./$1" 2>/dev/null || ln -sf "$src" "./$1"
+}
+
+_b=()   # response base name captured per step
+
+# Resolve the response-file prefix: session.sh set the recorded default in
+# _prefix; an exported HAL_FILE_PREFIX overrides it (set-but-empty is honored);
+# -p overrides both.
+[ "${HAL_FILE_PREFIX+x}" = x ] && _prefix=$HAL_FILE_PREFIX
+[ "$_cli_prefix_set" -eq 1 ]   && _prefix=$_cli_prefix
+
+# Capture, before _restore_plugins can change it, whether the caller set the
+# plugin list at replay entry — this gates the env restore in _check_plugin_env.
+_hal_plugins_set_at_entry=0
+[ -n "${HAL_LINK_PLUGIN+x}" ] && _hal_plugins_set_at_entry=1
 
 # Plugin auto-restore: if HAL_LINK_PLUGIN is not set at all (not even to an empty
 # value) and every plugin recorded at session creation is still available, restore
@@ -1808,8 +1808,8 @@ _check_plugins() {
 _check_plugins
 
 # Plugin env check/restore: the recorded plugin-name array (_plugin_cfg_names)
-# and per-plugin `-config` snippets (_plugin_cfg_<i>) were written above, and
-# _hal_plugins_set_at_entry captured whether the caller set HAL_LINK_PLUGIN
+# and per-plugin `-config` snippets (_plugin_cfg_<i>) were set by session.sh, and
+# _hal_plugins_set_at_entry (above) captured whether the caller set HAL_LINK_PLUGIN
 # before _restore_plugins ran.  When the plugin list was unset at replay entry
 # the session owns the environment, so each recorded snippet is eval'd to restore
 # it; when the list was set the caller drives the environment, so each plugin's
@@ -1834,7 +1834,34 @@ _check_plugin_env() {
     done
 }
 _check_plugin_env
-_NAHAL_PLUGIN_CHECK
+_NAHAL_PRELUDE
+chmod +x "$_BROW_PRELUDE"
+
+# ── session.sh — the header, the recorded per-session values, then the steps ──
+{
+    printf '#!/usr/bin/env bash\n'
+    printf '# HAL Browse session — %s\n' "$(date)"
+    printf '# Starting URL: %s\n' "$_BROW_START_URL"
+    printf '# Run from:     %s\n' "$_BROW_OUTDIR"
+    printf '# Replay machinery lives in session_prelude.sh (sourced below); this\n'
+    printf '# file records the per-session values and the request steps, and\n'
+    printf '# activates the HALDiSh environment via that prelude.\n'
+    printf '# Override the response-file prefix: -p <prefix> (highest), else\n'
+    printf '# $HAL_FILE_PREFIX, else the value recorded at session creation.\n'
+    printf 'set -euo pipefail\n'
+    printf 'cd "$(dirname "$0")"\n'
+    printf '\n'
+    printf '# ── recorded session values (consumed by session_prelude.sh) ──────────────────\n'
+    printf '_prefix=%q   # prefix recorded at session creation (default)\n' "$_BROW_PREFIX"
+    # Record the HAL_LINK_PLUGIN list as it stood at session creation, plus each
+    # configured plugin's environment (via its `-config` output), so the prelude
+    # can restore or diff the plugin list and env at replay.
+    printf '_plugins_created=%q\n' "${HAL_LINK_PLUGIN:-}"
+    _brow_emit_plugin_env
+    printf '\n'
+    printf '# Load the replay machinery: argument parsing, HALDiSh bootstrap,\n'
+    printf '# _ensure_method, and the plugin list/env restore-and-diff checks.\n'
+    printf 'source "$(dirname "$0")/session_prelude.sh"\n'
 } > "$_BROW_LOG"
 chmod +x "$_BROW_LOG"
 
