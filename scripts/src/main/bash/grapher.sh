@@ -1273,27 +1273,44 @@ _output_svg() {
             ix=$(( _BX[$t] + _BW[$t]/2 )); iy=${_BY[$t]}
             local my=$(( (oy + iy)/2 ))
             path="M $ox $oy V $my H $ix V $iy"
-            lx=$(( (ox + ix)/2 + 4 )); ly=$(( my - 3 ))
+            # Anchor on the bus turn above the target: unique x per sibling.
+            lx=$ix; ly=$my
         else
             ox=$(( _BX[$f] + _BW[$f] )); oy=$(( _BY[$f] + _BH[$f]/2 ))
             ix=${_BX[$t]};              iy=$(( _BY[$t] + _BH[$t]/2 ))
             local mx=$(( (ox + ix)/2 ))
             path="M $ox $oy H $mx V $iy H $ix"
-            lx=$(( mx + 4 )); ly=$(( (oy + iy)/2 - 3 ))
+            # Anchor on the segment entering the target: unique y per sibling.
+            lx=$(( (mx + ix)/2 )); ly=$iy
         fi
         local stroke='#333'
         [[ "${_GR_EDGE_GUESS[$i]:-}" == 'ambiguous' ]] && stroke='#c33'
         printf '  <path d="%s" fill="none" stroke="%s" marker-end="url(#arrow)"/>\n' "$path" "$stroke"
 
-        # Edge label: one <text> per non-empty line, stacked downward.
+        # Edge label: a center-anchored block set just above the anchor line,
+        # over a white halo so it reads clearly and stays tied to its edge.
+        # One <text> per non-empty line, stacked upward from the line.
         local lbl="${_GR_EDGE_LABEL[$i]}" line
+        local -a _ll=(); local _lmax=0
         if [[ -n "$lbl" ]]; then
             while IFS= read -r line; do
                 [[ -z "$line" ]] && continue
-                printf '  <text x="%d" y="%d" font-size="10" fill="#555">%s</text>\n' \
-                    "$lx" "$ly" "$(_esc_xml "$line")"
-                ly=$(( ly + 11 ))
+                _ll+=("$line"); (( ${#line} > _lmax )) && _lmax=${#line}
             done <<< "$lbl"
+        fi
+        local n=${#_ll[@]}
+        if (( n )); then
+            local charw=6 lh=11 gap=4 j
+            local bw=$(( _lmax * charw + 6 ))
+            local firsty=$(( ly - gap - (n - 1) * lh ))
+            printf '  <rect x="%d" y="%d" width="%d" height="%d" fill="white" fill-opacity="0.9"/>\n' \
+                "$(( lx - bw / 2 ))" "$(( firsty - 9 ))" "$bw" "$(( n * lh + 2 ))"
+            local ty=$firsty
+            for (( j = 0; j < n; j++ )); do
+                printf '  <text x="%d" y="%d" font-size="10" fill="#555" text-anchor="middle">%s</text>\n' \
+                    "$lx" "$ty" "$(_esc_xml "${_ll[$j]}")"
+                ty=$(( ty + lh ))
+            done
         fi
     done
 
