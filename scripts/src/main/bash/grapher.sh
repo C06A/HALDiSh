@@ -810,6 +810,15 @@ _esc_xml() {
     printf '%s' "$s"
 }
 
+# Escape a single line of text for a Graphviz HTML-like (<...>) label.
+_esc_html() {
+    local s="$1"
+    s="${s//&/&amp;}"
+    s="${s//</&lt;}"
+    s="${s//>/&gt;}"
+    printf '%s' "$s"
+}
+
 # Emit a valid Mermaid node ID (letters, digits, underscore, hyphen)
 _mermaid_id() {
     printf '%s' "$1" | tr -c 'a-zA-Z0-9_-' '_'
@@ -836,8 +845,13 @@ _output_dot() {
 
     local b
     for b in "${_GR_NODE_IDS[@]}"; do
-        printf '  "%s" [label="%s"];\n' \
-            "$(_esc_dot "$b")" "$(_esc_dot "${_GR_NODE_CURL[$b]:-}")"
+        # Bold basename header, then the curl command (one left-aligned line each).
+        local body='' line
+        while IFS= read -r line; do
+            body+="$(_esc_html "$line")<br align=\"left\"/>"
+        done <<< "${_GR_NODE_CURL[$b]:-}"
+        printf '  "%s" [label=<<b>%s</b><br/>%s>];\n' \
+            "$(_esc_dot "$b")" "$(_esc_html "$b")" "$body"
     done
 
     local i
@@ -857,8 +871,9 @@ _output_mermaid() {
 
     local b
     for b in "${_GR_NODE_IDS[@]}"; do
-        printf '  %s["%s"]\n' \
-            "$(_mermaid_id "$b")" "$(_esc_mermaid "${_GR_NODE_CURL[$b]:-}")"
+        printf '  %s["<b>%s</b><br>%s"]\n' \
+            "$(_mermaid_id "$b")" "$(_esc_mermaid "$b")" \
+            "$(_esc_mermaid "${_GR_NODE_CURL[$b]:-}")"
     done
 
     local i
@@ -876,8 +891,10 @@ _output_plantuml() {
 
     local b
     for b in "${_GR_NODE_IDS[@]}"; do
-        printf 'node "%s" as %s\n' \
-            "$(_esc_plantuml "${_GR_NODE_CURL[$b]:-}")" "$(_plantuml_id "$b")"
+        printf 'node "<b>%s</b>\\n%s" as %s\n' \
+            "$(_esc_plantuml "$b")" \
+            "$(_esc_plantuml "${_GR_NODE_CURL[$b]:-}")" \
+            "$(_plantuml_id "$b")"
     done
 
     local i
@@ -926,6 +943,7 @@ _ascii_box() {
     local bar; bar=$(_ascii_repeat '─' $(( w + 2 )))
     printf '┌%s┐\n'   "$bar"
     printf '│ %-*s │\n' "$w" "$id"
+    printf '├%s┤\n'   "$bar"
     printf '│ %-*s │\n' "$w" "$sub"
     printf '└%s┘\n'   "$bar"
 }
@@ -1054,8 +1072,9 @@ _cv_box() {
     bar="+$(_ascii_repeat '-' $(( w + 2 )))+"
     _cv_text "$y"        "$x" "$bar"
     _cv_text $(( y + 1 )) "$x" "$(printf '| %-*s |' "$w" "$id")"
-    _cv_text $(( y + 2 )) "$x" "$(printf '| %-*s |' "$w" "$sub")"
-    _cv_text $(( y + 3 )) "$x" "$bar"
+    _cv_text $(( y + 2 )) "$x" "$bar"
+    _cv_text $(( y + 3 )) "$x" "$(printf '| %-*s |' "$w" "$sub")"
+    _cv_text $(( y + 4 )) "$x" "$bar"
     return 0
 }
 
@@ -1157,7 +1176,7 @@ _lr_compute_layout() {
 _ascii_lr() {
     declare -A _CV=(); local _CV_MAXX=0 _CV_MAXY=0
     declare -A _W=() _OW=() _DEPTH=() _TOP=() _COLW=() _COLX=() _GAP=()
-    local _BOXH=4 _VGAP=2 _COFF=1 _LR_ROW=0 _LR_MAXD=0
+    local _BOXH=5 _VGAP=2 _COFF=1 _LR_ROW=0 _LR_MAXD=0
     local node i
 
     _lr_compute_layout
@@ -1234,7 +1253,7 @@ _output_svg() {
     # row spacing.
     local maxlines=1
     for node in "${_GR_NODE_IDS[@]}"; do
-        local cl="${_GR_NODE_CURL[$node]:-}" line w=0 nlines=0
+        local cl="${_GR_NODE_CURL[$node]:-}" line w=${#node} nlines=0
         while IFS= read -r line; do
             nlines=$(( nlines + 1 ))
             (( ${#line} > w )) && w=${#line}
@@ -1245,7 +1264,8 @@ _output_svg() {
         _W[$node]=$w; _OW[$node]=$(( w + 4 ))
         (( nlines > maxlines )) && maxlines=$nlines
     done
-    local _BOXH=$(( maxlines + 2 ))
+    # Rows: bold basename header + a separator + curl lines + top/bottom padding.
+    local _BOXH=$(( maxlines + 4 ))
 
     _lr_compute_layout
 
@@ -1338,15 +1358,20 @@ _output_svg() {
         fi
     done
 
-    # Boxes: the curl command, one <text> per line, each fitted to the box width.
+    # Boxes: a bold basename header, a separator rule, then the curl command
+    # (one <text> per line), each fitted to the box width.
     for node in "${_GR_NODE_IDS[@]}"; do
         local x=${_BX[$node]} y=${_BY[$node]} w=${_BW[$node]} h=${_BH[$node]}
         printf '  <rect x="%d" y="%d" width="%d" height="%d" rx="4" fill="#f5f5f5" stroke="#333"/>\n' \
             "$x" "$y" "$w" "$h"
+        printf '  <text x="%d" y="%d" font-size="11" font-weight="bold" fill="#111">%s</text>\n' \
+            "$(( x + 6 ))" "$(( y + 15 ))" "$(_esc_xml "$(_ascii_fit "$node" "${_W[$node]}")")"
+        printf '  <line x1="%d" y1="%d" x2="%d" y2="%d" stroke="#999"/>\n' \
+            "$x" "$(( y + 22 ))" "$(( x + w ))" "$(( y + 22 ))"
         local cl="${_GR_NODE_CURL[$node]:-}" line j=0
         while IFS= read -r line; do
             printf '  <text x="%d" y="%d" font-size="10" fill="#333">%s</text>\n' \
-                "$(( x + 6 ))" "$(( y + 14 + j * RY ))" \
+                "$(( x + 6 ))" "$(( y + 34 + j * RY ))" \
                 "$(_esc_xml "$(_ascii_fit "$line" "${_W[$node]}")")"
             j=$(( j + 1 ))
         done <<< "$cl"
