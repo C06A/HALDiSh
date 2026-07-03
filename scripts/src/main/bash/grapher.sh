@@ -1093,13 +1093,16 @@ _lr_layout() {
 _lr_compute_layout() {
     local node i
 
-    # Box widths and a first guess at depth (0 = root).
+    # Box widths and a first guess at depth (0 = root).  A caller may pre-set
+    # _W/_OW (the SVG renderer sizes boxes to the curl command); leave those.
     for node in "${_GR_NODE_IDS[@]}"; do
+        _DEPTH[$node]=0
+        [[ -n "${_W[$node]:-}" ]] && continue
         local sub; sub=$(_ascii_node_sub "$node")
         local w=${#node}
         (( ${#sub} > w )) && w=${#sub}
         (( w > 72 )) && w=72
-        _W[$node]=$w; _OW[$node]=$(( w + 4 )); _DEPTH[$node]=0
+        _W[$node]=$w; _OW[$node]=$(( w + 4 ))
     done
 
     # Edges always run earlier→later, so one ordered pass fixes every depth as the
@@ -1222,11 +1225,32 @@ _output_ascii() {
 # stacks siblings along y; tb transposes (depth → y, siblings → x).
 _output_svg() {
     declare -A _W=() _OW=() _DEPTH=() _TOP=() _COLW=() _COLX=() _GAP=()
-    local _BOXH=4 _VGAP=2 _COFF=1 _LR_ROW=0 _LR_MAXD=0
+    local _VGAP=2 _COFF=1 _LR_ROW=0 _LR_MAXD=0 node i
+
+    # Box content is the full curl command, matching the dot/mermaid/plantuml
+    # formats (one text line per curl line).  Pre-size each box to its widest
+    # curl line so _lr_compute_layout keeps it; a uniform height (the tallest
+    # curl plus a padding row top and bottom) preserves the tidy tree's equal-
+    # row spacing.
+    local maxlines=1
+    for node in "${_GR_NODE_IDS[@]}"; do
+        local cl="${_GR_NODE_CURL[$node]:-}" line w=0 nlines=0
+        while IFS= read -r line; do
+            nlines=$(( nlines + 1 ))
+            (( ${#line} > w )) && w=${#line}
+        done <<< "$cl"
+        (( nlines == 0 )) && nlines=1
+        (( w > 72 )) && w=72
+        (( w < 1 )) && w=1
+        _W[$node]=$w; _OW[$node]=$(( w + 4 ))
+        (( nlines > maxlines )) && maxlines=$nlines
+    done
+    local _BOXH=$(( maxlines + 2 ))
+
     _lr_compute_layout
 
-    local CW=8 RY=10 node i
-    local tb=0; [[ "$_GR_ORIENT" == 'tb' ]] && tb=1
+    local CW=8 RY=12 tb=0
+    [[ "$_GR_ORIENT" == 'tb' ]] && tb=1
 
     # For tb the sibling axis is horizontal, so its pitch must clear the widest
     # box; derive a uniform band unit (in chars) from the maximum box width.
@@ -1314,18 +1338,18 @@ _output_svg() {
         fi
     done
 
-    # Boxes: id on the upper line, "METHOD url" below (both fitted to box width).
+    # Boxes: the curl command, one <text> per line, each fitted to the box width.
     for node in "${_GR_NODE_IDS[@]}"; do
         local x=${_BX[$node]} y=${_BY[$node]} w=${_BW[$node]} h=${_BH[$node]}
-        local id sub
-        id=$(_ascii_fit "$node" "${_W[$node]}")
-        sub=$(_ascii_fit "$(_ascii_node_sub "$node")" "${_W[$node]}")
         printf '  <rect x="%d" y="%d" width="%d" height="%d" rx="4" fill="#f5f5f5" stroke="#333"/>\n' \
             "$x" "$y" "$w" "$h"
-        printf '  <text x="%d" y="%d" font-weight="bold">%s</text>\n' \
-            "$(( x + 6 ))" "$(( y + h/2 - 2 ))" "$(_esc_xml "$id")"
-        printf '  <text x="%d" y="%d" fill="#444">%s</text>\n' \
-            "$(( x + 6 ))" "$(( y + h/2 + 13 ))" "$(_esc_xml "$sub")"
+        local cl="${_GR_NODE_CURL[$node]:-}" line j=0
+        while IFS= read -r line; do
+            printf '  <text x="%d" y="%d" font-size="10" fill="#333">%s</text>\n' \
+                "$(( x + 6 ))" "$(( y + 14 + j * RY ))" \
+                "$(_esc_xml "$(_ascii_fit "$line" "${_W[$node]}")")"
+            j=$(( j + 1 ))
+        done <<< "$cl"
     done
 
     printf '</svg>\n'

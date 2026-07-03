@@ -300,11 +300,12 @@ teardown() {
     _group g2 --url 'https://api.example.com/a'
     run bash "$GRAPHER_SH" --format svg "$WORK_DIR"
     [ "$status" -eq 0 ]
-    # Native <svg> root with the xmlns and both node basenames carried through.
+    # Native <svg> root with the xmlns; each box carries its curl command (as the
+    # dot/mermaid/plantuml formats do), not the base name and METHOD/URL.
     [[ "$output" == *'<svg xmlns="http://www.w3.org/2000/svg"'* ]]
     [[ "$output" == *'</svg>'* ]]
-    [[ "$output" == *'>g1<'* ]]
-    [[ "$output" == *'>g2<'* ]]
+    [[ "$output" == *'curl https://api.example.com/<'* ]]
+    [[ "$output" == *'curl https://api.example.com/a<'* ]]
     # The edge is drawn as an arrowed path.
     [[ "$output" == *'marker-end="url(#arrow)"'* ]]
 }
