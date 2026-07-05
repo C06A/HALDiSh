@@ -1254,17 +1254,21 @@ _brow_nav_links() {
 
         # Show href, then loop on the action menu so "show link details" keeps
         # offering actions for the same link instead of dropping back to the list.
-        local href
+        # A deprecated link (one carrying a `deprecation` URL) also offers to open
+        # that documentation page in the browser.
+        local href depr
         href=$(_brow_qkr "$link_obj" 'href')
+        depr=$(_brow_qr "$link_obj" '.deprecation // empty')
         while true; do
             printf '\n  %s → %s\n' "$rel" "$href" >&2
+            [[ -n "$depr" ]] && printf '  (deprecated: %s)\n' "$depr" >&2
+
+            local -a action_opts=("follow (send request)" "show link details")
+            [[ -n "$depr" ]] && action_opts+=("open deprecation docs")
+            action_opts+=("${_BROW_NAV}back")
 
             local action
-            action=$(printf '%s\n' \
-                "follow (send request)" \
-                "show link details" \
-                "${_BROW_NAV}back" \
-                | menu.sh "Action")
+            action=$(printf '%s\n' "${action_opts[@]}" | menu.sh "Action")
 
             case "$action" in
                 # `|| true`: a non-HAL response makes _brow_follow_link return 1 as
@@ -1272,6 +1276,7 @@ _brow_nav_links() {
                 # `set -e` would treat the failed case arm as fatal and exit.
                 "follow (send request)") _brow_follow_link "$link_obj" "$rel" "$src_base" "$link_idx" || true; break ;;
                 "show link details")     _brow_pretty "$link_obj" ;;
+                "open deprecation docs") _brow_open_deprecation "$link_obj" "$rel" "$src_base" ;;
                 back)                    break ;;
             esac
         done
@@ -1499,6 +1504,46 @@ _brow_open_docs() {
     else
         hal::log::warn "No browser opener found (tried open, xdg-open).  URL: ${url}"
     fi
+}
+
+# _brow_open_deprecation <link_json> <rel> <src_base>
+# Opens a deprecated link's `deprecation` URL (a documentation page explaining the
+# deprecation) in the browser.  The URL is run through HAL_LINK_PLUGIN — the same
+# filters a link's href gets when it is followed — by rewriting a copy of the link
+# so its href is the deprecation URL, piping it through the plugin chain, then
+# opening the resulting href.  No-op (warns) when the link carries no deprecation.
+_brow_open_deprecation() {
+    local link_json="$1" rel="$2" src_base="${3:-}"
+
+    local depr
+    depr=$(_brow_qr "$link_json" '.deprecation // empty')
+    [[ -z "$depr" ]] && { hal::log::warn "link has no deprecation URL"; return 0; }
+
+    # Carry the deprecation URL as the link's href so the plugin chain treats it
+    # exactly like a followable href (prepend a base, expand a CURIE, …), keeping
+    # the rest of the link object as context for the plugins.
+    local depr_link
+    if [[ "$_BROW_TOOL" == yq ]]; then
+        depr_link=$(printf '%s' "$link_json" | HAL_HREF="$depr" yq -o json -I0 '.href = env(HAL_HREF)')
+    else
+        depr_link=$(printf '%s' "$link_json" | jq -c --arg h "$depr" '.href = $h')
+    fi
+
+    if [[ -n "${HAL_LINK_PLUGIN:-}" ]]; then
+        # The resource the link belongs to (by step number), not the last fetch.
+        local _src_base_name="${_BROW_STEP_BASE[$src_base]:-$_BROW_LAST_BASE}"
+        local _resource_file=''
+        [[ -n "$_src_base_name" ]] && _resource_file="${_BROW_OUTDIR}/${_src_base_name}.body"
+        depr_link=$(_hal_run_plugins "$depr_link" \
+            ${_resource_file:+"$_resource_file"} \
+            "${_BROW_NAV_PATH[@]+"${_BROW_NAV_PATH[@]}"}" \
+            "links" "$rel") \
+            || { hal::log::error "plugin failed — not opening deprecation docs"; return 0; }
+    fi
+
+    local url
+    url=$(_brow_qkr "$depr_link" 'href')
+    _brow_open_docs "$url"
 }
 
 # _brow_nav_docs <json> <src_base>

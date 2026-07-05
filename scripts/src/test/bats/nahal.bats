@@ -556,6 +556,39 @@ CURI_RES='{"_links":{"self":{"href":"/r"},"curies":[{"name":"ex","href":"https:/
     [ "$status" -ne 0 ]
 }
 
+# ── deprecation ───────────────────────────────────────────────────────────────
+
+@test "_brow_open_deprecation: opens the link's deprecation URL" {
+    export OPEN_LOG="${WORK_DIR}/opened"
+    _src '_brow_open_deprecation "$1" self 0' '{"href":"/api/r","deprecation":"https://ex.com/why"}'
+    [ "$status" -eq 0 ]
+    run cat "${OPEN_LOG}"
+    [ "$output" = "https://ex.com/why" ]
+}
+
+@test "_brow_open_deprecation: warns and opens nothing when the link is not deprecated" {
+    export OPEN_LOG="${WORK_DIR}/opened"
+    _src '_brow_open_deprecation "$1" self 0' '{"href":"/api/r"}'
+    [ "$status" -eq 0 ]
+    [ ! -e "${OPEN_LOG}" ]
+}
+
+@test "_brow_open_deprecation: runs the deprecation URL through HAL_LINK_PLUGIN" {
+    # Same filter a followed href gets: a plugin that prepends "PLUGIN:" to .href.
+    local plug="${WORK_DIR}/depplug.sh"
+    cat > "$plug" <<'PLUG'
+#!/usr/bin/env bash
+sed 's#"href":"#"href":"PLUGIN:#'
+PLUG
+    chmod +x "$plug"
+    export HAL_LINK_PLUGIN="$plug"
+    export OPEN_LOG="${WORK_DIR}/opened"
+    _src '_brow_open_deprecation "$1" self 0' '{"href":"/api/r","deprecation":"https://ex.com/why"}'
+    [ "$status" -eq 0 ]
+    run cat "${OPEN_LOG}"
+    [ "$output" = "PLUGIN:https://ex.com/why" ]
+}
+
 # ── interactive session smoke tests ───────────────────────────────────────────
 
 @test "interactive: GET a HAL resource then quit" {
@@ -729,6 +762,40 @@ PLUG
         _ "$NAHAL_SH" "$WORK_DIR"
     [ "$status" -eq 0 ]
     [[ "$stderr" != *"docs"* ]]
+}
+
+@test "interactive: a deprecated link offers 'open deprecation docs' and opens the URL" {
+    # Single non-self link so the links-menu position is deterministic across
+    # jq (sorted) and yq (document order).
+    export MOCK_BODY='{"_links":{"old":{"href":"/old","deprecation":"https://ex.com/dep"}},"title":"t"}'
+    export OPEN_LOG="${WORK_DIR}/opened"
+    # Resource menu: links(1) properties(2) print(3) raw(4) quit(5)
+    _type_key '1'   # links
+    _type_key '2'   # old   (links menu: back(1) old(2))
+    _type_key '3'   # open deprecation docs (action: follow(1) details(2) open deprecation docs(3) back(4))
+    _type_key '4'   # back  (action) → links list
+    _type_key '1'   # back  (links) → resource
+    _type_key '5'   # quit
+    run --separate-stderr bash -c 'cd "$2" && bash "$1" -p step_ http://example.com/api' \
+        _ "$NAHAL_SH" "$WORK_DIR"
+    [ "$status" -eq 0 ]
+    [[ "$stderr" == *"deprecated: https://ex.com/dep"* ]]
+    run cat "${OPEN_LOG}"
+    [ "$output" = "https://ex.com/dep" ]
+}
+
+@test "interactive: a non-deprecated link does not offer 'open deprecation docs'" {
+    # Default MOCK_BODY's self link carries no deprecation; the action menu is
+    # follow(1) details(2) back(3) — selecting 3 returns to the links list.
+    _type_key '1'   # links
+    _type_key '2'   # self  (links menu: back(1) self(2))
+    _type_key '3'   # back  (action: follow(1) details(2) back(3)) → links list
+    _type_key '1'   # back  (links) → resource
+    _type_key '5'   # quit
+    run --separate-stderr bash -c 'cd "$2" && bash "$1" -p step_ http://example.com/api' \
+        _ "$NAHAL_SH" "$WORK_DIR"
+    [ "$status" -eq 0 ]
+    [[ "$stderr" != *"deprecation docs"* ]]
 }
 
 # ── links menu: curies display mode (-c / NAHAL_CURIES) ───────────────────────
