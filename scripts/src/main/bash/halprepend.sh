@@ -7,7 +7,9 @@
 #     hallink.sh resource.json links self
 #
 # Reads link JSON from stdin, prepends HAL_PREPEND_BASE to .href, writes JSON
-# to stdout.  HAL_PREPEND_BASE unset or empty: passes link through unchanged.
+# to stdout.  Only a *relative* href is rewritten — an href that already carries
+# a protocol (scheme:) or a domain (protocol-relative //host) is left unchanged.
+# HAL_PREPEND_BASE unset or empty: passes link through unchanged.
 # Positional args ([resource-file] [path…]) are accepted and ignored.
 #
 # With '-config' as the first argument, prints a shell snippet that recreates
@@ -33,11 +35,17 @@ if [[ -z "${HAL_PREPEND_BASE:-}" ]]; then
     exit 0
 fi
 
+# An absolute href already carries a protocol (scheme:) or a domain
+# (protocol-relative //host); prepend the base only to a relative href.
+_abs_re='^([a-zA-Z][a-zA-Z0-9+.-]*:|//)'
+
 if command -v jq >/dev/null 2>&1 && printf '{}' | jq '.' >/dev/null 2>&1; then
-    printf '%s' "$_link" | jq -c --arg b "$HAL_PREPEND_BASE" '.href = ($b + .href)'
+    printf '%s' "$_link" | jq -c --arg b "$HAL_PREPEND_BASE" --arg re "$_abs_re" \
+        '.href = (if (.href | test($re)) then .href else ($b + .href) end)'
 elif command -v yq >/dev/null 2>&1 && printf '{}' | yq '.' >/dev/null 2>&1; then
     printf '%s' "$_link" \
-        | HALPREPEND_BASE="$HAL_PREPEND_BASE" yq -o json -I0 '.href = env(HALPREPEND_BASE) + .href'
+        | HALPREPEND_BASE="$HAL_PREPEND_BASE" HALPREPEND_ABS_RE="$_abs_re" \
+          yq -o json -I0 '.href = (.href | (select(test(env(HALPREPEND_ABS_RE))) // (env(HALPREPEND_BASE) + .)))'
 else
     printf 'halprepend: jq or yq required\n' >&2; exit 4
 fi

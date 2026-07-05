@@ -88,6 +88,47 @@ teardown() {
     [[ "$output" == *'"href"'* ]]
 }
 
+# ── absolute href — left unchanged (no protocol/domain to add) ────────────────
+
+@test "halprepend.sh leaves an https:// href unchanged" {
+    run env HAL_PREPEND_BASE='https://example.com' bash "$HALPREPEND_SH" \
+        <<< '{"href":"https://other.com/api/items"}'
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'"https://other.com/api/items"'* ]]
+    [[ "$output" != *'https://example.com'* ]]
+}
+
+@test "halprepend.sh leaves an http:// href unchanged" {
+    run env HAL_PREPEND_BASE='https://example.com' bash "$HALPREPEND_SH" \
+        <<< '{"href":"http://other.com/x"}'
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'"http://other.com/x"'* ]]
+    [[ "$output" != *'https://example.com'* ]]
+}
+
+@test "halprepend.sh leaves a protocol-relative //host href unchanged" {
+    run env HAL_PREPEND_BASE='https://example.com' bash "$HALPREPEND_SH" \
+        <<< '{"href":"//other.com/x"}'
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'"//other.com/x"'* ]]
+    [[ "$output" != *'https://example.com'* ]]
+}
+
+@test "halprepend.sh leaves a non-http scheme href unchanged" {
+    run env HAL_PREPEND_BASE='https://example.com' bash "$HALPREPEND_SH" \
+        <<< '{"href":"mailto:a@b.com"}'
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'"mailto:a@b.com"'* ]]
+    [[ "$output" != *'https://example.com'* ]]
+}
+
+@test "halprepend.sh still prepends to a root-relative href" {
+    run env HAL_PREPEND_BASE='https://example.com' bash "$HALPREPEND_SH" \
+        <<< '{"href":"/api/items"}'
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'https://example.com/api/items'* ]]
+}
+
 # ── positional args accepted and ignored ─────────────────────────────────────
 
 @test "halprepend.sh accepts resource-file and path args (plugin contract)" {
