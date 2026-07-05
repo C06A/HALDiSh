@@ -433,7 +433,10 @@ The resource menu offers only the sections the resource actually has:
 
 * `links` — browse `_links`; pick a relation (templated links are marked `{T}`),
   choose an element for array-valued links, then *follow* it or *show link
-  details*.  Relations are listed by local name unless `-c on` / `NAHAL_CURIES`
+  details*.  A deprecated link (one carrying a `deprecation` URL) also offers
+  *open deprecation docs*, which opens that page in the browser; the URL is run
+  through `HAL_LINK_PLUGIN` first, exactly as a followed link's href is.
+  Relations are listed by local name unless `-c on` / `NAHAL_CURIES`
   is set (see Usage); the reserved `curies` array is never listed.
 * `embedded` — descend into `_embedded` resources (selecting an index for arrays).
 * `properties` — traverse the non-HAL properties (objects, arrays, scalars).
@@ -841,9 +844,12 @@ printf '{"href":"[ord:widget]"}' \
 == `halprepend.sh` — prepend a base URL to a HAL link's href
 
 Replaces a HAL link object's `href` field with `<base> + <href>`, leaving all
-other fields (`title`, `type`, `templated`, …) unchanged.  Accepts a link
-object directly or navigates to one through a HAL document file.  Output
-format matches the input format (JSON → JSON, YAML → YAML, XML → XML).
+other fields (`title`, `type`, `templated`, …) unchanged.  Only a *relative*
+href is rewritten — one that already carries a protocol (`scheme:`) or a domain
+(protocol-relative `//host`) is an absolute reference and is passed through
+untouched.  Accepts a link object directly or navigates to one through a HAL
+document file.  Output format matches the input format (JSON → JSON, YAML →
+YAML, XML → XML).
 
 Requires `yq` (mikefarah/yq v4) or `jq` for JSON.
 
@@ -887,6 +893,10 @@ halprepend.sh 'https://api.example.com' --link '{"href":"/orders","title":"Order
 
 # Read the link from stdin
 echo '{"href":"/items"}' | halprepend.sh 'https://api.example.com' --link
+
+# An already-absolute href is left unchanged (no base prepended)
+echo '{"href":"https://other.example.com/x"}' | halprepend.sh 'https://api.example.com' --link
+# → {"href":"https://other.example.com/x"}
 
 # Convert a server-relative href into an absolute URL before following it
 link=$(halprepend.sh 'https://api.example.com' resource.json links next)
@@ -2027,7 +2037,8 @@ extraction, interactive navigation.
 |`nahal.bats`
 |`nahal.sh` — content-type classification, format detection / conversion, query
 helpers, HTTP-method-token validation, dropped `file://` path decoding,
-method-invocation resolution and custom-method links, CURIE docs, array-of-
+method-invocation resolution and custom-method links, CURIE docs, deprecated-link
+documentation opening, array-of-
 resources navigation, predictable step-file naming via `hal_basename.sh`/`-s`,
 and `session.sh` replay generation (structural and end-to-end).
 
@@ -2049,9 +2060,9 @@ prefixes / prefix-less / no-href / no-root-file, sibling-field preservation,
 `jq`-only path, exit code specificity.
 
 |`halprepend.bats`
-|`halprepend.sh` — `--link` and file+path modes, base concatenation, field
-preservation, basename resolution, format preservation (JSON/YAML/XML), exit
-code specificity.
+|`halprepend.sh` — `--link` and file+path modes, base concatenation, relative-only
+rewrite (absolute hrefs left unchanged), field preservation, basename resolution,
+format preservation (JSON/YAML/XML), exit code specificity.
 
 |`adoc.bats`
 |`adoc.sh` — file grouping, AsciiDoc region wrapping, stdin mode.
